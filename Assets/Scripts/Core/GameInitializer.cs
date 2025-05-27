@@ -512,20 +512,24 @@ namespace MetaBalance.UI
                 pickRateGauge.fillAmount = popularity / 100f;
             }
         }
-        
+
         private void UpdateCharacterTabs(CharacterType selectedType)
         {
             foreach (var kvp in _characterTabs)
             {
-                // Get the tab's button and image
-                Button tabButton = kvp.Key.GetComponent<Button>();
-                Image tabImage = kvp.Key.GetComponent<Image>();
-                
+                // Extract the key (CharacterType) and value (GameObject) for clarity
+                CharacterType tabCharacterType = kvp.Key;
+                GameObject tabGameObject = kvp.Value;
+
+                // Get the tab's button and image components from the GameObject
+                Button tabButton = tabGameObject.GetComponent<Button>();
+                Image tabImage = tabGameObject.GetComponent<Image>();
+
                 if (tabButton == null || tabImage == null)
                     continue;
-                    
+
                 // Highlight selected tab
-                if (kvp.Value == selectedType)
+                if (tabCharacterType == selectedType)
                 {
                     // Make selected tab brighter
                     ColorBlock colors = tabButton.colors;
@@ -533,23 +537,24 @@ namespace MetaBalance.UI
                     colors.highlightedColor = tabImage.color;
                     colors.selectedColor = tabImage.color;
                     tabButton.colors = colors;
-                    
+
                     // Add selected visual effect
-                    tabImage.transform.localScale = new Vector3(1.1f, 1.1f, 1.1f);
+                    tabGameObject.transform.localScale = new Vector3(1.1f, 1.1f, 1.1f);
                 }
                 else
                 {
                     // Dim non-selected tabs
                     ColorBlock colors = tabButton.colors;
-                    colors.normalColor = new Color(tabImage.color.r * 0.7f, tabImage.color.g * 0.7f, tabImage.color.b * 0.7f);
+                    colors.normalColor = new Color(tabImage.color.r * 0.7f, tabImage.color.g * 0.7f,
+                        tabImage.color.b * 0.7f);
                     tabButton.colors = colors;
-                    
+
                     // Remove selected visual effect
-                    tabImage.transform.localScale = Vector3.one;
+                    tabGameObject.transform.localScale = Vector3.one;
                 }
             }
         }
-        
+
         private void UpdateSatisfactionMeter()
         {
             if (_characterManager == null || satisfactionSlider == null)
