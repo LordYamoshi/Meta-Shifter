@@ -6,37 +6,60 @@ using System.Collections.Generic;
 namespace MetaBalance.UI
 {
     /// <summary>
-    /// Simple UI manager for testing the core systems
+    /// Updated UI manager that works with the prefab-based card system
     /// </summary>
     public class UIManager : MonoBehaviour
     {
         [Header("Top UI")]
         [SerializeField] private TextMeshProUGUI weekPhaseText;
-        [SerializeField] private TextMeshProUGUI resourcesText;
+        [SerializeField] private TextMeshProUGUI rpText;
+        [SerializeField] private TextMeshProUGUI cpText;
+        [SerializeField] private Slider satisfactionSlider;
+        [SerializeField] private TextMeshProUGUI satisfactionText;
         [SerializeField] private Button nextPhaseButton;
+        [SerializeField] private TextMeshProUGUI nextPhaseButtonText;
         
         [Header("Character Display")]
         [SerializeField] private Transform characterStatsContainer;
-        [SerializeField] private GameObject characterStatPrefab;
+        [SerializeField] private List<CharacterUIPanel> characterPanels = new List<CharacterUIPanel>();
         
-        [Header("Card Hand")]
-        [SerializeField] private Transform handContainer;
-        [SerializeField] private GameObject cardButtonPrefab;
-        [SerializeField] private TextMeshProUGUI handInfoText;
+        [Header("Drop Zone")]
+        [SerializeField] private Cards.CardDropZone dropZone;
+        [SerializeField] private TextMeshProUGUI dropZoneInstructionText;
         
         [Header("Debug")]
-        [SerializeField] private Button drawCardButton;
         [SerializeField] private TextMeshProUGUI debugText;
+        [SerializeField] private Button drawCardButton;
+        [SerializeField] private Button clearHandButton;
         
-        // UI References
-        private Dictionary<Characters.CharacterType, GameObject> characterDisplays = new Dictionary<Characters.CharacterType, GameObject>();
-        private List<GameObject> handButtons = new List<GameObject>();
+        // Track current selection
+        private Characters.CharacterType selectedCharacter = Characters.CharacterType.Warrior;
         
         private void Start()
         {
             SetupUI();
             SubscribeToEvents();
+            
+            // Initialize community satisfaction
+            InitializeCommunitySystem();
+            
             UpdateDisplay();
+        }
+        
+        private void InitializeCommunitySystem()
+        {
+            // Initialize satisfaction slider to 65% (good starting value)
+            if (satisfactionSlider != null)
+            {
+                satisfactionSlider.value = 0.65f;
+            }
+            
+            if (satisfactionText != null)
+            {
+                satisfactionText.text = "65.0%";
+            }
+            
+            Debug.Log("Initialized community satisfaction to 65%");
         }
         
         private void SetupUI()
@@ -47,12 +70,12 @@ namespace MetaBalance.UI
                 nextPhaseButton.onClick.AddListener(() => {
                     if (Core.PhaseManager.Instance != null)
                     {
-                        Core.PhaseManager.Instance.AdvanceToNextPhase();
+                        Core.PhaseManager.Instance.AdvancePhase();
                     }
                 });
             }
             
-            // Setup draw card button
+            // Setup debug buttons
             if (drawCardButton != null)
             {
                 drawCardButton.onClick.AddListener(() => {
@@ -63,51 +86,58 @@ namespace MetaBalance.UI
                 });
             }
             
-            CreateCharacterDisplays();
+            if (clearHandButton != null)
+            {
+                clearHandButton.onClick.AddListener(() => {
+                    if (Cards.CardManager.Instance != null)
+                    {
+                        Cards.CardManager.Instance.DebugClearHand();
+                    }
+                });
+            }
+            
+            // Setup character panel click handlers
+            SetupCharacterPanels();
+            
+            // Initialize satisfaction slider
+            if (satisfactionSlider != null)
+            {
+                satisfactionSlider.value = 0.65f; // 65% starting satisfaction
+            }
         }
         
-        private void CreateCharacterDisplays()
+        private void SetupCharacterPanels()
         {
-            if (characterStatsContainer == null) return;
-            
-            foreach (Characters.CharacterType type in System.Enum.GetValues(typeof(Characters.CharacterType)))
+            for (int i = 0; i < characterPanels.Count; i++)
             {
-                GameObject statDisplay = new GameObject($"{type}_Stats");
-                statDisplay.transform.SetParent(characterStatsContainer, false);
-                
-                // Add vertical layout group
-                var layoutGroup = statDisplay.AddComponent<VerticalLayoutGroup>();
-                layoutGroup.spacing = 5f;
-                layoutGroup.padding = new RectOffset(10, 10, 10, 10);
-                
-                // Add background
-                var image = statDisplay.AddComponent<Image>();
-                image.color = new Color(0.2f, 0.2f, 0.2f, 0.8f);
-                
-                // Character name
-                GameObject nameObj = new GameObject("Name");
-                nameObj.transform.SetParent(statDisplay.transform, false);
-                var nameText = nameObj.AddComponent<TextMeshProUGUI>();
-                nameText.text = type.ToString();
-                nameText.fontSize = 18f;
-                nameText.fontStyle = FontStyles.Bold;
-                
-                // Win rate (most important)
-                GameObject winRateObj = new GameObject("WinRate");
-                winRateObj.transform.SetParent(statDisplay.transform, false);
-                var winRateText = winRateObj.AddComponent<TextMeshProUGUI>();
-                winRateText.text = "Win Rate: 50%";
-                winRateText.fontSize = 16f;
-                
-                // Popularity
-                GameObject popObj = new GameObject("Popularity");
-                popObj.transform.SetParent(statDisplay.transform, false);
-                var popText = popObj.AddComponent<TextMeshProUGUI>();
-                popText.text = "Popularity: 50%";
-                popText.fontSize = 14f;
-                
-                characterDisplays[type] = statDisplay;
+                if (characterPanels[i] != null)
+                {
+                    Characters.CharacterType characterType = (Characters.CharacterType)i;
+                    characterPanels[i].Setup(characterType, () => SelectCharacter(characterType));
+                    
+                    // Set first character as selected
+                    if (i == 0)
+                    {
+                        characterPanels[i].SetSelected(true);
+                    }
+                }
             }
+        }
+        
+        private void SelectCharacter(Characters.CharacterType character)
+        {
+            selectedCharacter = character;
+            
+            // Update visual selection
+            for (int i = 0; i < characterPanels.Count; i++)
+            {
+                if (characterPanels[i] != null)
+                {
+                    characterPanels[i].SetSelected((Characters.CharacterType)i == character);
+                }
+            }
+            
+            UpdateDebugText($"Selected {character}");
         }
         
         private void SubscribeToEvents()
@@ -117,18 +147,21 @@ namespace MetaBalance.UI
             {
                 Core.PhaseManager.Instance.OnPhaseChanged.AddListener(OnPhaseChanged);
                 Core.PhaseManager.Instance.OnWeekChanged.AddListener(OnWeekChanged);
+                Core.PhaseManager.Instance.OnPhaseButtonTextChanged.AddListener(OnPhaseButtonTextChanged);
             }
             
             // Resource manager events
             if (Core.ResourceManager.Instance != null)
             {
                 Core.ResourceManager.Instance.OnResourcesChanged.AddListener(OnResourcesChanged);
+                Core.ResourceManager.Instance.OnResourcesGenerated.AddListener(OnResourcesGenerated);
             }
             
             // Character manager events
             if (Characters.CharacterManager.Instance != null)
             {
                 Characters.CharacterManager.Instance.OnStatChanged.AddListener(OnCharacterStatChanged);
+                Characters.CharacterManager.Instance.OnOverallBalanceChanged.AddListener(OnOverallBalanceChanged);
             }
             
             // Card manager events
@@ -136,7 +169,12 @@ namespace MetaBalance.UI
             {
                 Cards.CardManager.Instance.OnHandChanged.AddListener(OnHandChanged);
                 Cards.CardManager.Instance.OnCardPlayed.AddListener(OnCardPlayed);
-                Cards.CardManager.Instance.OnCardsEarned.AddListener(OnCardsEarned);
+            }
+            
+            // Drop zone events
+            if (dropZone != null)
+            {
+                dropZone.OnCardsChanged.AddListener(OnDropZoneChanged);
             }
         }
         
@@ -144,7 +182,7 @@ namespace MetaBalance.UI
         {
             UpdateTopUI();
             UpdateCharacterStats();
-            UpdateHandDisplay();
+            UpdateDropZoneDisplay();
         }
         
         private void UpdateTopUI()
@@ -155,17 +193,20 @@ namespace MetaBalance.UI
                 var phaseManager = Core.PhaseManager.Instance;
                 if (phaseManager != null)
                 {
-                    weekPhaseText.text = $"Week {phaseManager.GetCurrentWeek()} - {phaseManager.GetCurrentPhase()}";
+                    weekPhaseText.text = $"Week {phaseManager.GetCurrentWeek()} - {phaseManager.GetPhaseDisplayName()}";
                 }
             }
             
             // Update resources display
-            if (resourcesText != null)
+            if (rpText != null || cpText != null)
             {
                 var resourceManager = Core.ResourceManager.Instance;
                 if (resourceManager != null)
                 {
-                    resourcesText.text = $"RP: {resourceManager.ResearchPoints} | CP: {resourceManager.CommunityPoints}";
+                    if (rpText != null)
+                        rpText.text = $"RP: {resourceManager.ResearchPoints}";
+                    if (cpText != null)
+                        cpText.text = $"CP: {resourceManager.CommunityPoints}";
                 }
             }
         }
@@ -175,121 +216,50 @@ namespace MetaBalance.UI
             var characterManager = Characters.CharacterManager.Instance;
             if (characterManager == null) return;
             
-            foreach (var kvp in characterDisplays)
+            for (int i = 0; i < characterPanels.Count; i++)
             {
-                Characters.CharacterType type = kvp.Key;
-                GameObject display = kvp.Value;
-                
-                // Update win rate text
-                var winRateText = display.transform.Find("WinRate")?.GetComponent<TextMeshProUGUI>();
-                if (winRateText != null)
+                if (characterPanels[i] != null)
                 {
+                    Characters.CharacterType type = (Characters.CharacterType)i;
                     float winRate = characterManager.GetStat(type, Characters.CharacterStat.WinRate);
-                    winRateText.text = $"Win Rate: {winRate:F1}%";
-                    
-                    // Color code based on balance
-                    winRateText.color = winRate switch
-                    {
-                        > 55f => Color.red,      // Overpowered
-                        < 45f => Color.cyan,     // Underpowered  
-                        _ => Color.green         // Balanced
-                    };
-                }
-                
-                // Update popularity text
-                var popText = display.transform.Find("Popularity")?.GetComponent<TextMeshProUGUI>();
-                if (popText != null)
-                {
                     float popularity = characterManager.GetStat(type, Characters.CharacterStat.Popularity);
-                    popText.text = $"Popularity: {popularity:F1}%";
+                    
+                    characterPanels[i].UpdateStats(winRate, popularity);
                 }
             }
         }
         
-        private void UpdateHandDisplay()
+        private void UpdateDropZoneDisplay()
         {
-            // Clear existing hand buttons
-            foreach (var button in handButtons)
+            if (dropZoneInstructionText == null) return;
+            
+            var phaseManager = Core.PhaseManager.Instance;
+            if (phaseManager == null) return;
+            
+            string instructionText = phaseManager.GetCurrentPhase() switch
             {
-                if (button != null) Destroy(button);
-            }
-            handButtons.Clear();
+                Core.GamePhase.Planning => "Drop cards here to implement balance changes",
+                Core.GamePhase.Implementation => "Cards are being implemented...",
+                Core.GamePhase.Feedback => "Review the results of your changes",
+                Core.GamePhase.Event => "Handle community events",
+                _ => "Drop cards here to implement balance changes"
+            };
             
-            var cardManager = Cards.CardManager.Instance;
-            if (cardManager == null || handContainer == null) return;
-            
-            var hand = cardManager.GetCurrentHand();
-            
-            // Update hand info
-            if (handInfoText != null)
-            {
-                handInfoText.text = $"Hand: {hand.Count}/{cardManager.GetHandSize()} | Deck: {cardManager.GetDeckSize()}";
-            }
-            
-            // Create button for each card in hand
-            for (int i = 0; i < hand.Count; i++)
-            {
-                var card = hand[i];
-                int cardIndex = i; // Capture for closure
-                
-                GameObject cardButton = new GameObject($"Card_{i}");
-                cardButton.transform.SetParent(handContainer, false);
-                
-                // Add button component
-                var button = cardButton.AddComponent<Button>();
-                var image = cardButton.AddComponent<Image>();
-                
-                // Set color based on rarity
-                image.color = card.rarity switch
-                {
-                    Cards.CardRarity.Common => new Color(0.8f, 0.8f, 0.8f),
-                    Cards.CardRarity.Uncommon => new Color(0.2f, 0.8f, 0.2f),
-                    Cards.CardRarity.Rare => new Color(0.2f, 0.2f, 1f),
-                    Cards.CardRarity.Epic => new Color(0.8f, 0.2f, 0.8f),
-                    Cards.CardRarity.Special => new Color(1f, 0.8f, 0.2f),
-                    _ => Color.white
-                };
-                
-                // Add text
-                GameObject textObj = new GameObject("Text");
-                textObj.transform.SetParent(cardButton.transform, false);
-                var cardText = textObj.AddComponent<TextMeshProUGUI>();
-                cardText.text = $"{card.cardName}\n{card.researchPointCost}RP {card.communityPointCost}CP";
-                cardText.fontSize = 12f;
-                cardText.alignment = TextAlignmentOptions.Center;
-                
-                // Set text rect to fill button
-                var textRect = cardText.GetComponent<RectTransform>();
-                textRect.anchorMin = Vector2.zero;
-                textRect.anchorMax = Vector2.one;
-                textRect.offsetMin = Vector2.zero;
-                textRect.offsetMax = Vector2.zero;
-                
-                // Add click handler
-                button.onClick.AddListener(() => {
-                    cardManager.PlayCardByIndex(cardIndex);
-                });
-                
-                // Check if card is playable
-                var resourceManager = Core.ResourceManager.Instance;
-                bool canPlay = resourceManager != null && 
-                              resourceManager.CanSpend(card.researchPointCost, card.communityPointCost);
-                
-                button.interactable = canPlay;
-                if (!canPlay)
-                {
-                    image.color = new Color(image.color.r, image.color.g, image.color.b, 0.5f);
-                }
-                
-                handButtons.Add(cardButton);
-            }
+            dropZoneInstructionText.text = instructionText;
         }
         
         // Event handlers
         private void OnPhaseChanged(Core.GamePhase newPhase)
         {
             UpdateTopUI();
+            UpdateDropZoneDisplay();
             UpdateDebugText($"Phase changed to {newPhase}");
+            
+            // Update card affordability when phase changes
+            if (Cards.CardManager.Instance != null)
+            {
+                Cards.CardManager.Instance.RefreshAllCardsInHand();
+            }
         }
         
         private void OnWeekChanged(int newWeek)
@@ -298,10 +268,28 @@ namespace MetaBalance.UI
             UpdateDebugText($"Started week {newWeek}");
         }
         
+        private void OnPhaseButtonTextChanged(string buttonText)
+        {
+            if (nextPhaseButtonText != null)
+            {
+                nextPhaseButtonText.text = buttonText;
+            }
+        }
+        
         private void OnResourcesChanged(int rp, int cp)
         {
             UpdateTopUI();
-            UpdateHandDisplay(); // Update card playability
+            
+            // Update card affordability when resources change
+            if (Cards.CardManager.Instance != null)
+            {
+                Cards.CardManager.Instance.RefreshAllCardsInHand();
+            }
+        }
+        
+        private void OnResourcesGenerated(int rpGained, int cpGained)
+        {
+            UpdateDebugText($"Generated: +{rpGained} RP, +{cpGained} CP");
         }
         
         private void OnCharacterStatChanged(Characters.CharacterType character, Characters.CharacterStat stat, float newValue)
@@ -310,9 +298,27 @@ namespace MetaBalance.UI
             UpdateDebugText($"{character} {stat}: {newValue:F1}");
         }
         
+        private void OnOverallBalanceChanged(float balanceScore)
+        {
+            // Convert balance score (0-100) to satisfaction percentage
+            float satisfactionPercentage = Mathf.Clamp(balanceScore, 0f, 100f);
+            
+            if (satisfactionSlider != null)
+            {
+                satisfactionSlider.value = satisfactionPercentage / 100f; // Convert to 0-1 range
+            }
+            
+            if (satisfactionText != null)
+            {
+                satisfactionText.text = $"{satisfactionPercentage:F1}%";
+            }
+            
+            Debug.Log($"Community satisfaction updated to {satisfactionPercentage:F1}%");
+        }
+        
         private void OnHandChanged(List<Cards.CardData> newHand)
         {
-            UpdateHandDisplay();
+            UpdateDebugText($"Hand updated: {newHand.Count} cards");
         }
         
         private void OnCardPlayed(Cards.CardData card)
@@ -320,10 +326,9 @@ namespace MetaBalance.UI
             UpdateDebugText($"Played: {card.cardName}");
         }
         
-        private void OnCardsEarned(List<Cards.CardData> earnedCards)
+        private void OnDropZoneChanged(List<Cards.CardData> queuedCards)
         {
-            string cardNames = string.Join(", ", earnedCards.ConvertAll(c => c.cardName));
-            UpdateDebugText($"Earned cards: {cardNames}");
+            UpdateDebugText($"Queued cards: {queuedCards.Count}");
         }
         
         private void UpdateDebugText(string message)
@@ -333,6 +338,99 @@ namespace MetaBalance.UI
                 debugText.text = $"{System.DateTime.Now:HH:mm:ss} - {message}";
             }
             Debug.Log(message);
+        }
+    }
+    
+    /// <summary>
+    /// Component for individual character UI panels
+    /// </summary>
+    [System.Serializable]
+    public class CharacterUIPanel : MonoBehaviour
+    {
+        [Header("UI References")]
+        [SerializeField] private TextMeshProUGUI characterNameText;
+        [SerializeField] private TextMeshProUGUI roleText;
+        [SerializeField] private TextMeshProUGUI winRateText;
+        [SerializeField] private TextMeshProUGUI popularityText;
+        [SerializeField] private Image characterIcon;
+        [SerializeField] private Image backgroundImage;
+        [SerializeField] private Button selectButton;
+        
+        [Header("Visual Settings")]
+        [SerializeField] private Color normalBackgroundColor = new Color(0.2f, 0.2f, 0.2f, 0.8f);
+        [SerializeField] private Color selectedBackgroundColor = new Color(0.3f, 0.5f, 0.8f, 0.9f);
+        
+        private Characters.CharacterType characterType;
+        private System.Action onSelected;
+        
+        public void Setup(Characters.CharacterType type, System.Action onSelectCallback)
+        {
+            characterType = type;
+            onSelected = onSelectCallback;
+            
+            // Setup UI
+            if (characterNameText != null)
+                characterNameText.text = type.ToString();
+            
+            if (roleText != null)
+            {
+                roleText.text = type switch
+                {
+                    Characters.CharacterType.Warrior => "Melee Fighter",
+                    Characters.CharacterType.Mage => "Ranged Caster",
+                    Characters.CharacterType.Support => "Utility",
+                    Characters.CharacterType.Tank => "Defensive",
+                    _ => "Unknown"
+                };
+            }
+            
+            // Setup button
+            if (selectButton != null)
+            {
+                selectButton.onClick.AddListener(() => onSelected?.Invoke());
+            }
+            
+            // Setup icon color
+            if (characterIcon != null)
+            {
+                characterIcon.color = type switch
+                {
+                    Characters.CharacterType.Warrior => new Color(0.9f, 0.3f, 0.3f), // Red
+                    Characters.CharacterType.Mage => new Color(0.3f, 0.5f, 0.9f), // Blue
+                    Characters.CharacterType.Support => new Color(0.3f, 0.9f, 0.5f), // Green
+                    Characters.CharacterType.Tank => new Color(0.9f, 0.7f, 0.3f), // Orange
+                    _ => Color.white
+                };
+            }
+        }
+        
+        public void UpdateStats(float winRate, float popularity)
+        {
+            if (winRateText != null)
+            {
+                winRateText.text = $"{winRate:F1}%";
+                
+                // Color code win rate
+                winRateText.color = winRate switch
+                {
+                    > 55f => Color.red,      // Overpowered
+                    < 45f => Color.cyan,     // Underpowered  
+                    _ => Color.green         // Balanced
+                };
+            }
+            
+            if (popularityText != null)
+            {
+                popularityText.text = $"Pop: {popularity:F0}%";
+            }
+        }
+        
+        public void SetSelected(bool selected)
+        {
+            if (backgroundImage != null)
+            {
+                backgroundImage.color = selected ? selectedBackgroundColor : normalBackgroundColor;
+            }
         }
     }
 }

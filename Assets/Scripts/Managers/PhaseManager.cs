@@ -4,7 +4,7 @@ using UnityEngine.Events;
 namespace MetaBalance.Core
 {
     /// <summary>
-    /// Updated Phase Manager that only advances when button is pressed
+    /// Updated PhaseManager that properly handles button text and phase transitions
     /// </summary>
     public class PhaseManager : MonoBehaviour
     {
@@ -14,13 +14,10 @@ namespace MetaBalance.Core
         [SerializeField] private int currentWeek = 1;
         [SerializeField] private GamePhase currentPhase = GamePhase.Planning;
         
-        [Header("Phase Settings")]
-        [SerializeField] private bool autoAdvancePhases = false; // Set to false for manual control
-        
         [Header("Events")]
         public UnityEvent<GamePhase> OnPhaseChanged;
         public UnityEvent<int> OnWeekChanged;
-        public UnityEvent<string> OnPhaseButtonTextChanged; // For updating button text
+        public UnityEvent<string> OnPhaseButtonTextChanged;
         
         private void Awake()
         {
@@ -112,6 +109,21 @@ namespace MetaBalance.Core
         }
         
         /// <summary>
+        /// Get the current phase display name for UI
+        /// </summary>
+        public string GetPhaseDisplayName()
+        {
+            return currentPhase switch
+            {
+                GamePhase.Planning => "Planning Phase",
+                GamePhase.Implementation => "Implementation Phase",
+                GamePhase.Feedback => "Feedback Phase",
+                GamePhase.Event => "Event Phase",
+                _ => "Unknown Phase"
+            };
+        }
+        
+        /// <summary>
         /// Check if player can perform certain actions based on current phase
         /// </summary>
         public bool CanDragCards() => currentPhase == GamePhase.Planning;
@@ -143,6 +155,15 @@ namespace MetaBalance.Core
             currentPhase = phase;
             OnPhaseChanged.Invoke(currentPhase);
             UpdateButtonText();
+        }
+        
+        /// <summary>
+        /// Skip to specific week for testing
+        /// </summary>
+        public void SetWeek(int week)
+        {
+            currentWeek = week;
+            OnWeekChanged.Invoke(currentWeek);
         }
     }
 }

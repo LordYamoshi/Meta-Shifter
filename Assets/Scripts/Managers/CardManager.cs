@@ -6,7 +6,7 @@ using UnityEngine.Events;
 namespace MetaBalance.Cards
 {
     /// <summary>
-    /// Manages player hand, deck, and card playing
+    /// Updated CardManager that works with Unity prefabs and your drag-drop system
     /// </summary>
     public class CardManager : MonoBehaviour
     {
@@ -15,19 +15,21 @@ namespace MetaBalance.Cards
         [Header("Card Database")]
         [SerializeField] private List<CardData> allAvailableCards = new List<CardData>();
         
-        [Header("Player Collection")]
-        [SerializeField] private List<CardData> playerDeck = new List<CardData>();
-        [SerializeField] private List<CardData> currentHand = new List<CardData>();
-        
-        [Header("Settings")]
+        [Header("Hand Management")]
+        [SerializeField] private Transform handContainer;
+        [SerializeField] private GameObject cardPrefab;
         [SerializeField] private int maxHandSize = 7;
-        [SerializeField] private int cardsPerPhase = 2;
-        [SerializeField] private int startingDeckSize = 20;
+        [SerializeField] private int cardsDrawnPerWeek = 2;
+        
+        [Header("Starting Resources")]
+        [SerializeField] private int startingRP = 24;
+        [SerializeField] private int startingCP = 0;
         
         [Header("Events")]
         public UnityEvent<List<CardData>> OnHandChanged;
         public UnityEvent<CardData> OnCardPlayed;
-        public UnityEvent<List<CardData>> OnCardsEarned;
+        
+        private List<DraggableCard> currentHandCards = new List<DraggableCard>();
         
         private void Awake()
         {
@@ -47,26 +49,27 @@ namespace MetaBalance.Cards
                 Core.PhaseManager.Instance.OnPhaseChanged.AddListener(OnPhaseChanged);
             }
             
-            BuildStartingDeck();
+            // Subscribe to resource changes for real-time updates
+            if (Core.ResourceManager.Instance != null)
+            {
+                Core.ResourceManager.Instance.OnResourcesChanged.AddListener(OnResourcesChanged);
+                Debug.Log("✅ Subscribed to resource changes for real-time affordability updates");
+            }
+            
+            // Set starting resources
+            if (Core.ResourceManager.Instance != null)
+            {
+                Core.ResourceManager.Instance.SetStartingResources(startingRP, startingCP);
+            }
+            
+            // Draw initial hand
             DrawInitialHand();
         }
         
-        private void BuildStartingDeck()
+        private void OnResourcesChanged(int rp, int cp)
         {
-            playerDeck.Clear();
-            
-            // Add basic cards of each type
-            var commonCards = allAvailableCards.Where(card => card.rarity == CardRarity.Common).ToList();
-            
-            // Add random common cards to reach starting deck size
-            for (int i = 0; i < startingDeckSize && commonCards.Count > 0; i++)
-            {
-                var randomCard = commonCards[Random.Range(0, commonCards.Count)];
-                playerDeck.Add(randomCard);
-            }
-            
-            ShuffleDeck();
-            Debug.Log($"Built starting deck with {playerDeck.Count} cards");
+            Debug.Log($"🔄 Resources changed: RP={rp}, CP={cp} - updating all card affordability");
+            UpdateAllCardAffordability();
         }
         
         private void DrawInitialHand()
@@ -78,65 +81,210 @@ namespace MetaBalance.Cards
         {
             if (newPhase == Core.GamePhase.Planning)
             {
-                // Draw new cards and earn cards each planning phase
-                EarnNewCards();
-                DrawCards(cardsPerPhase);
+                // Draw new cards each week
+                DrawCards(cardsDrawnPerWeek);
+                
+                // UNLOCK ALL CARDS - enable dragging for all cards everywhere during planning
+                UnlockAllCardsForDragging();
+                
+                // Update all cards in hand to show current affordability
+                RefreshAllCardsInHand();
+                
+                // Start real-time affordability updates
+                StartAffordabilityUpdates();
+            }
+            else
+            {
+                // LOCK ALL CARDS - disable dragging when not in planning phase
+                LockAllCardsFromDragging();
+                
+                // Stop real-time updates
+                StopAffordabilityUpdates();
             }
         }
         
-        private void EarnNewCards()
+        private void StartAffordabilityUpdates()
         {
-            List<CardData> earnedCards = new List<CardData>();
+            // Update affordability every 0.2 seconds during planning phase
+            InvokeRepeating(nameof(UpdateAllCardAffordability), 0f, 0.2f);
+        }
+        
+        private void StopAffordabilityUpdates()
+        {
+            CancelInvoke(nameof(UpdateAllCardAffordability));
+        }
+        
+        private void UpdateAllCardAffordability()
+        {
+            Debug.Log("🔄 Updating affordability for all cards...");
             
-            // Determine how many cards to earn (base + performance bonus)
-            int cardsToEarn = cardsPerPhase;
-            
-            // Get current week to determine what rarities are available
-            int currentWeek = Core.PhaseManager.Instance?.GetCurrentWeek() ?? 1;
-            
-            for (int i = 0; i < cardsToEarn; i++)
+            // Update all cards in hand
+            int handUpdated = 0;
+            foreach (var card in currentHandCards)
             {
-                CardData newCard = SelectRandomCard(currentWeek);
-                if (newCard != null)
+                if (card != null)
                 {
-                    playerDeck.Add(newCard);
-                    earnedCards.Add(newCard);
+                    card.RefreshAffordabilityOnly();
+                    handUpdated++;
                 }
             }
             
-            if (earnedCards.Count > 0)
+            // Update all cards in drop zones
+            int dropZoneUpdated = 0;
+            var allDropZones = FindObjectsOfType<Cards.CardDropZone>();
+            foreach (var dropZone in allDropZones)
             {
-                OnCardsEarned.Invoke(earnedCards);
-                Debug.Log($"Earned {earnedCards.Count} new cards: {string.Join(", ", earnedCards.Select(c => c.cardName))}");
+                var cardsInDropZone = dropZone.GetQueuedCards();
+                foreach (var card in cardsInDropZone)
+                {
+                    if (card != null)
+                    {
+                        card.RefreshAffordabilityOnly();
+                        dropZoneUpdated++;
+                    }
+                }
             }
+            
+            Debug.Log($"✅ Updated affordability: {handUpdated} hand cards + {dropZoneUpdated} drop zone cards");
         }
         
-        private CardData SelectRandomCard(int currentWeek)
+        private void UnlockAllCardsForDragging()
         {
-            // Filter cards by what should be available at current week
+            Debug.Log("🔓 UNLOCKING ALL CARDS FOR PLANNING PHASE");
+            
+            int handCardsUnlocked = 0;
+            int dropZoneCardsUnlocked = 0;
+            
+            // Enable dragging for cards in hand
+            foreach (var card in currentHandCards)
+            {
+                if (card != null)
+                {
+                    Debug.Log($"   🔓 Unlocking {card.CardData.cardName} in hand (was: {card.IsDraggingEnabled()})");
+                    card.SetDraggingEnabled(true);
+                    handCardsUnlocked++;
+                }
+            }
+            
+            // Enable dragging for cards in drop zones
+            var allDropZones = FindObjectsOfType<Cards.CardDropZone>();
+            Debug.Log($"   🔍 Found {allDropZones.Length} drop zones");
+            
+            foreach (var dropZone in allDropZones)
+            {
+                var cardsInDropZone = dropZone.GetQueuedCards();
+                Debug.Log($"   🔍 Drop zone {dropZone.name} has {cardsInDropZone.Count} cards");
+                
+                foreach (var card in cardsInDropZone)
+                {
+                    if (card != null)
+                    {
+                        Debug.Log($"   🔓 Unlocking {card.CardData.cardName} in drop zone (was: {card.IsDraggingEnabled()})");
+                        card.SetDraggingEnabled(true);
+                        dropZoneCardsUnlocked++;
+                    }
+                }
+            }
+            
+            Debug.Log($"✅ PLANNING PHASE UNLOCK COMPLETE: {handCardsUnlocked} hand cards + {dropZoneCardsUnlocked} drop zone cards = {handCardsUnlocked + dropZoneCardsUnlocked} total cards unlocked");
+        }
+        
+        private void LockAllCardsFromDragging()
+        {
+            // Disable dragging for cards in hand
+            foreach (var card in currentHandCards)
+            {
+                if (card != null)
+                {
+                    card.SetDraggingEnabled(false);
+                }
+            }
+            
+            // Disable dragging for cards in drop zones
+            var allDropZones = FindObjectsOfType<Cards.CardDropZone>();
+            foreach (var dropZone in allDropZones)
+            {
+                var cardsInDropZone = dropZone.GetQueuedCards();
+                foreach (var card in cardsInDropZone)
+                {
+                    if (card != null)
+                    {
+                        card.SetDraggingEnabled(false);
+                    }
+                }
+            }
+            
+            Debug.Log("NON-PLANNING PHASE: All cards locked from dragging");
+        }
+        
+        public void DrawCards(int count)
+        {
+            if (handContainer == null || cardPrefab == null)
+            {
+                Debug.LogError("Hand container or card prefab not set!");
+                return;
+            }
+            
+            for (int i = 0; i < count && currentHandCards.Count < maxHandSize; i++)
+            {
+                // Get random card from available cards
+                CardData randomCard = GetRandomAvailableCard();
+                if (randomCard == null) continue;
+                
+                // Instantiate card prefab
+                GameObject cardObject = Instantiate(cardPrefab, handContainer);
+                DraggableCard draggableCard = cardObject.GetComponent<DraggableCard>();
+                
+                if (draggableCard != null)
+                {
+                    // Set the card data
+                    draggableCard.SetCardData(randomCard);
+                    currentHandCards.Add(draggableCard);
+                    
+                    // Set dragging state based on current phase
+                    bool isPlanning = Core.PhaseManager.Instance?.GetCurrentPhase() == Core.GamePhase.Planning;
+                    draggableCard.SetDraggingEnabled(isPlanning);
+                }
+                else
+                {
+                    Debug.LogError("Card prefab missing DraggableCard component!");
+                    Destroy(cardObject);
+                }
+            }
+            
+            Debug.Log($"Drew {count} cards. Hand size: {currentHandCards.Count}");
+        }
+        
+        private CardData GetRandomAvailableCard()
+        {
+            if (allAvailableCards.Count == 0) return null;
+            
+            // Get current week to determine available rarities
+            int currentWeek = Core.PhaseManager.Instance?.GetCurrentWeek() ?? 1;
+            
+            // Filter cards by availability
             var availableCards = allAvailableCards.Where(card => IsCardAvailable(card, currentWeek)).ToList();
+            if (availableCards.Count == 0) return allAvailableCards[Random.Range(0, allAvailableCards.Count)];
             
-            if (availableCards.Count == 0) return null;
-            
-            // Weight by rarity (common cards more likely)
+            // Weighted selection by rarity
             var weightedCards = new List<(CardData card, float weight)>();
             
             foreach (var card in availableCards)
             {
                 float weight = card.rarity switch
                 {
-                    CardRarity.Common => 0.5f,
-                    CardRarity.Uncommon => 0.3f,
-                    CardRarity.Rare => 0.15f,
-                    CardRarity.Epic => 0.04f,
-                    CardRarity.Special => 0.01f,
-                    _ => 0.1f
+                    CardRarity.Common => 50f,
+                    CardRarity.Uncommon => 30f,
+                    CardRarity.Rare => 15f,
+                    CardRarity.Epic => 4f,
+                    CardRarity.Special => 1f,
+                    _ => 10f
                 };
                 
                 weightedCards.Add((card, weight));
             }
             
-            // Select based on weighted random
+            // Select based on weight
             float totalWeight = weightedCards.Sum(w => w.weight);
             float randomValue = Random.Range(0f, totalWeight);
             
@@ -155,7 +303,6 @@ namespace MetaBalance.Cards
         
         private bool IsCardAvailable(CardData card, int currentWeek)
         {
-            // Unlock cards based on week and rarity
             return card.rarity switch
             {
                 CardRarity.Common => true,
@@ -167,85 +314,76 @@ namespace MetaBalance.Cards
             };
         }
         
-        public void DrawCards(int count)
+        public void RemoveCardFromHand(DraggableCard card)
         {
-            for (int i = 0; i < count && currentHand.Count < maxHandSize; i++)
+            if (currentHandCards.Contains(card))
             {
-                if (playerDeck.Count == 0)
-                {
-                    Debug.Log("No more cards in deck to draw");
-                    break;
-                }
+                currentHandCards.Remove(card);
+                Debug.Log($"Removed {card.CardData.cardName} from hand list (but not destroyed)");
+            }
+        }
+        
+        public void ReturnCardToHand(DraggableCard card)
+        {
+            // Add back to hand list if not already there
+            if (!currentHandCards.Contains(card))
+            {
+                currentHandCards.Add(card);
+            }
+            
+            // Store the card's COMPLETE original transform properties BEFORE any changes
+            var rectTransform = card.GetComponent<RectTransform>();
+            Vector2 originalAnchoredPos = rectTransform.anchoredPosition;
+            Vector2 originalAnchorMin = rectTransform.anchorMin;
+            Vector2 originalAnchorMax = rectTransform.anchorMax;
+            Vector2 originalPivot = rectTransform.pivot;
+            Vector2 originalSizeDelta = rectTransform.sizeDelta;
+            Vector3 originalScale = rectTransform.localScale;
+            Quaternion originalRotation = rectTransform.localRotation;
+            Vector2 originalOffsetMin = rectTransform.offsetMin;
+            Vector2 originalOffsetMax = rectTransform.offsetMax;
+            
+            // Return to hand container
+            if (handContainer != null)
+            {
+                card.transform.SetParent(handContainer, true); // Use worldPositionStays = true
                 
-                // Draw from deck
-                var drawnCard = playerDeck[0];
-                playerDeck.RemoveAt(0);
-                currentHand.Add(drawnCard);
+                // COMPLETELY RESTORE all transform properties to maintain exact same appearance
+                rectTransform.anchorMin = originalAnchorMin;
+                rectTransform.anchorMax = originalAnchorMax;
+                rectTransform.pivot = originalPivot;
+                rectTransform.sizeDelta = originalSizeDelta;
+                rectTransform.localScale = originalScale;
+                rectTransform.localRotation = originalRotation;
+                rectTransform.offsetMin = originalOffsetMin;
+                rectTransform.offsetMax = originalOffsetMax;
+                rectTransform.anchoredPosition = originalAnchoredPos;
+                
+                // Re-enable dragging
+                card.SetDraggingEnabled(true);
+                
+                Debug.Log($"Returned {card.CardData.cardName} to hand with completely preserved transform properties");
             }
-            
-            OnHandChanged.Invoke(currentHand);
-            Debug.Log($"Drew {count} cards. Hand size: {currentHand.Count}");
         }
         
-        public bool PlayCard(CardData card)
+        public void RefreshAllCardsInHand()
         {
-            if (!currentHand.Contains(card))
+            foreach (var card in currentHandCards)
             {
-                Debug.Log("Card not in hand!");
-                return false;
-            }
-            
-            // Check if player can afford the card
-            var resourceManager = Core.ResourceManager.Instance;
-            if (resourceManager == null || !resourceManager.CanSpend(card.researchPointCost, card.communityPointCost))
-            {
-                Debug.Log($"Cannot afford {card.cardName}: needs {card.researchPointCost} RP, {card.communityPointCost} CP");
-                return false;
-            }
-            
-            // Pay the cost
-            resourceManager.SpendResources(card.researchPointCost, card.communityPointCost);
-            
-            // Play the card effect
-            card.PlayCard();
-            
-            // Remove from hand
-            currentHand.Remove(card);
-            
-            OnCardPlayed.Invoke(card);
-            OnHandChanged.Invoke(currentHand);
-            
-            Debug.Log($"Played {card.cardName}");
-            return true;
-        }
-        
-        public bool PlayCardByIndex(int handIndex)
-        {
-            if (handIndex < 0 || handIndex >= currentHand.Count)
-            {
-                Debug.Log($"Invalid hand index: {handIndex}");
-                return false;
-            }
-            
-            return PlayCard(currentHand[handIndex]);
-        }
-        
-        private void ShuffleDeck()
-        {
-            for (int i = playerDeck.Count - 1; i > 0; i--)
-            {
-                int randomIndex = Random.Range(0, i + 1);
-                var temp = playerDeck[i];
-                playerDeck[i] = playerDeck[randomIndex];
-                playerDeck[randomIndex] = temp;
+                if (card != null)
+                {
+                    card.RefreshAffordabilityOnly();
+                }
             }
         }
         
         // Public getters
-        public List<CardData> GetCurrentHand() => new List<CardData>(currentHand);
-        public List<CardData> GetDeck() => new List<CardData>(playerDeck);
-        public int GetHandSize() => currentHand.Count;
-        public int GetDeckSize() => playerDeck.Count;
+        public List<CardData> GetCurrentHandData()
+        {
+            return currentHandCards.Where(c => c != null).Select(c => c.CardData).ToList();
+        }
+        
+        public int GetHandSize() => currentHandCards.Count;
         
         // Debug methods
         [ContextMenu("Draw Card")]
@@ -254,23 +392,64 @@ namespace MetaBalance.Cards
             DrawCards(1);
         }
         
-        [ContextMenu("Play First Card")]
-        public void DebugPlayFirstCard()
+        [ContextMenu("Clear Hand")]
+        public void DebugClearHand()
         {
-            if (currentHand.Count > 0)
+            foreach (var card in currentHandCards)
             {
-                PlayCard(currentHand[0]);
+                if (card != null) Destroy(card.gameObject);
+            }
+            currentHandCards.Clear();
+        }
+        
+        [ContextMenu("Refresh Hand Display")]
+        public void DebugRefreshHand()
+        {
+            RefreshAllCardsInHand();
+        }
+        
+        [ContextMenu("Force Update All Card Displays")]
+        public void DebugForceUpdateAllCardDisplays()
+        {
+            Debug.Log("=== FORCE UPDATING ALL CARD DISPLAYS ===");
+            foreach (var card in currentHandCards)
+            {
+                if (card != null)
+                {
+                    Debug.Log($"Force updating display for {card.CardData?.cardName ?? "null cardData"}");
+                    card.RefreshDisplay();
+                }
             }
         }
         
-        [ContextMenu("Add Random Card to Deck")]
-        public void DebugAddRandomCard()
+        [ContextMenu("Check All Card States")]
+        public void DebugCheckAllCardStates()
         {
-            if (allAvailableCards.Count > 0)
+            Debug.Log("=== CHECKING ALL CARD STATES ===");
+            Debug.Log($"Current Phase: {Core.PhaseManager.Instance?.GetCurrentPhase()}");
+            Debug.Log($"Hand Cards: {currentHandCards.Count}");
+            
+            foreach (var card in currentHandCards)
             {
-                var randomCard = allAvailableCards[Random.Range(0, allAvailableCards.Count)];
-                playerDeck.Add(randomCard);
-                Debug.Log($"Added {randomCard.cardName} to deck");
+                if (card != null)
+                {
+                    Debug.Log($"  Hand Card: {card.CardData?.cardName ?? "null"} - Dragging: {card.IsDraggingEnabled()} - Parent: {card.transform.parent.name}");
+                }
+            }
+            
+            var allDropZones = FindObjectsOfType<Cards.CardDropZone>();
+            foreach (var dropZone in allDropZones)
+            {
+                var cardsInDropZone = dropZone.GetQueuedCards();
+                Debug.Log($"Drop Zone {dropZone.name}: {cardsInDropZone.Count} cards");
+                
+                foreach (var card in cardsInDropZone)
+                {
+                    if (card != null)
+                    {
+                        Debug.Log($"  Drop Zone Card: {card.CardData?.cardName ?? "null"} - Dragging: {card.IsDraggingEnabled()} - Parent: {card.transform.parent.name}");
+                    }
+                }
             }
         }
     }

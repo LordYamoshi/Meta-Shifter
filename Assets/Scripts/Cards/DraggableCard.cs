@@ -6,31 +6,31 @@ using UnityEngine.UI;
 namespace MetaBalance.Cards
 {
     /// <summary>
-    /// Makes cards draggable from hand to center area
+    /// Clean DraggableCard with proper initialization and cost display
     /// </summary>
     public class DraggableCard : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHandler
     {
-        [Header("Card Data")] [SerializeField] private CardData cardData;
+        [Header("Card Data")]
+        [SerializeField] private CardData cardData;
 
-        [Header("Drag Settings")] [SerializeField]
-        private Canvas canvas;
-
-        [SerializeField] private GraphicRaycaster raycaster;
-
-        
-        [Header("UI References")]
+        [Header("UI References - Link these to your prefab components")]
         [SerializeField] private TextMeshProUGUI cardNameText;
         [SerializeField] private TextMeshProUGUI descriptionText;
-        [SerializeField] private TextMeshProUGUI costText;
         [SerializeField] private TextMeshProUGUI cardTypeText;
+        [SerializeField] private TextMeshProUGUI rpCostText;
+        [SerializeField] private TextMeshProUGUI cpCostText;
         [SerializeField] private Image cardBackgroundImage;
-        [SerializeField] private Image cardArtImage;
+        [SerializeField] private Image rarityIndicator;
+        
+        [Header("Drag Settings")]
+        [SerializeField] private Canvas canvas;
         
         private RectTransform rectTransform;
         private CanvasGroup canvasGroup;
         private Vector3 originalPosition;
         private Transform originalParent;
         private bool isDragging = false;
+        private bool draggingEnabled = true;
 
         public CardData CardData => cardData;
 
@@ -44,136 +44,211 @@ namespace MetaBalance.Cards
 
             if (canvas == null)
                 canvas = GetComponentInParent<Canvas>();
+                
+            // Auto-find UI components if not assigned
+            AutoFindUIComponents();
+        }
+        
+        private void Start()
+        {
+            // Initialize the card display when the object starts
+            if (cardData != null)
+            {
+                UpdateCardDisplay();
+            }
+        }
+
+        private void AutoFindUIComponents()
+        {
+            if (cardNameText == null)
+                cardNameText = transform.Find("CardName")?.GetComponent<TextMeshProUGUI>();
+            if (descriptionText == null)
+                descriptionText = transform.Find("Description")?.GetComponent<TextMeshProUGUI>();
+            if (cardTypeText == null)
+                cardTypeText = transform.Find("CardType")?.GetComponent<TextMeshProUGUI>();
+            if (rpCostText == null)
+                rpCostText = transform.Find("Costs/RP")?.GetComponent<TextMeshProUGUI>();
+            if (cpCostText == null)
+                cpCostText = transform.Find("Costs/CP")?.GetComponent<TextMeshProUGUI>();
+            if (cardBackgroundImage == null)
+                cardBackgroundImage = GetComponent<Image>();
         }
 
         public void SetCardData(CardData data)
         {
             cardData = data;
+            Debug.Log($"SetCardData called for {data.cardName}: RP={data.researchPointCost}, CP={data.communityPointCost}");
+            
+            // Force immediate update
             UpdateCardDisplay();
+            
+            // Also force update on next frame to ensure UI components are ready
+            Invoke(nameof(ForceDisplayUpdate), 0.1f);
+        }
+        
+        private void ForceDisplayUpdate()
+        {
+            if (cardData != null)
+            {
+                Debug.Log($"ForceDisplayUpdate for {cardData.cardName}");
+                UpdateCardDisplay();
+            }
         }
 
-        /// <summary>
-        /// Enhanced card display update that handles multiple ways to find UI elements
-        /// </summary>
+        public void SetDraggingEnabled(bool enabled)
+        {
+            draggingEnabled = enabled;
+        }
+        
+        public bool IsDraggingEnabled()
+        {
+            return draggingEnabled;
+        }
+
         private void UpdateCardDisplay()
         {
             if (cardData == null) return;
             
-            UpdateCardName();
-            UpdateDescription();
-            UpdateCost();
-            UpdateCardType();
-            UpdateCardArt();
-            UpdateCardBackground();
-
-            Debug.Log($"Updated card display for: {cardData.cardName}");
+            // Update card name
+            if (cardNameText != null)
+                cardNameText.text = cardData.cardName;
+            
+            // Update description
+            if (descriptionText != null)
+                descriptionText.text = cardData.description;
+            
+            // Update card type
+            if (cardTypeText != null)
+            {
+                cardTypeText.text = GetCardTypeDisplayName(cardData.cardType);
+                cardTypeText.color = GetCardTypeColor(cardData.cardType);
+            }
+            
+            // Update costs - ALWAYS from CardData
+            UpdateCostDisplay();
+            
+            // Update rarity color
+            UpdateRarityDisplay();
+            
+            // Update affordability
+            UpdateAffordabilityDisplay();
         }
 
-        private void UpdateCardName()
+        private void UpdateCostDisplay()
         {
-            var nameText = cardNameText ??
-                           transform.Find("CardName")?.GetComponent<TextMeshProUGUI>() ??
-                           transform.Find("Name")?.GetComponent<TextMeshProUGUI>() ??
-                           transform.Find("Title")?.GetComponent<TextMeshProUGUI>();
-
-            if (nameText != null)
+            if (cardData == null) 
             {
-                nameText.text = cardData.cardName;
-                nameText.color = Color.white;
+                Debug.LogWarning("UpdateCostDisplay called but cardData is null!");
+                return;
+            }
+            
+            Debug.Log($"UpdateCostDisplay for {cardData.cardName}: RP={cardData.researchPointCost}, CP={cardData.communityPointCost}");
+            
+            // Update RP cost (left aligned) - ALWAYS from CardData
+            if (rpCostText != null)
+            {
+                if (cardData.researchPointCost > 0)
+                {
+                    rpCostText.text = $"{cardData.researchPointCost} RP";
+                    rpCostText.color = Color.black; // Set default color to black
+                    rpCostText.gameObject.SetActive(true);
+                    Debug.Log($"Set RP text to: '{rpCostText.text}' with black color");
+                }
+                else
+                {
+                    rpCostText.gameObject.SetActive(false);
+                    Debug.Log("Hidden RP cost (cost is 0)");
+                }
             }
             else
             {
-                Debug.LogWarning($"Could not find card name text component on {gameObject.name}");
+                Debug.LogWarning("rpCostText is null!");
             }
-        }
-
-        private void UpdateDescription()
-        {
-            var descText = descriptionText ??
-                           transform.Find("Description")?.GetComponent<TextMeshProUGUI>() ??
-                           transform.Find("Effect")?.GetComponent<TextMeshProUGUI>() ??
-                           transform.Find("Text")?.GetComponent<TextMeshProUGUI>();
-
-            if (descText != null)
+            
+            // Update CP cost (right aligned) - ALWAYS from CardData
+            if (cpCostText != null)
             {
-                descText.text = cardData.description;
-                descText.color = new Color(0.9f, 0.9f, 0.9f);
-            }
-        }
-
-        private void UpdateCost()
-        {
-            var costText = this.costText ??
-                           transform.Find("Cost")?.GetComponent<TextMeshProUGUI>() ??
-                           transform.Find("Resources")?.GetComponent<TextMeshProUGUI>();
-
-            if (costText != null)
-            {
-                string costString = "";
-
-                if (cardData.researchPointCost > 0)
-                    costString += $"{cardData.researchPointCost} RP";
-
                 if (cardData.communityPointCost > 0)
                 {
-                    if (costString.Length > 0) costString += " ";
-                    costString += $"{cardData.communityPointCost} CP";
+                    cpCostText.text = $"{cardData.communityPointCost} CP";
+                    cpCostText.color = Color.black; // Set default color to black
+                    cpCostText.gameObject.SetActive(true);
+                    Debug.Log($"Set CP text to: '{cpCostText.text}' with black color");
                 }
-
-                if (costString.Length == 0)
-                    costString = "Free";
-
-                costText.text = costString;
-                costText.color = CanAffordCard() ? Color.white : Color.red;
+                else
+                {
+                    cpCostText.gameObject.SetActive(false);
+                    Debug.Log("Hidden CP cost (cost is 0)");
+                }
+            }
+            else
+            {
+                Debug.LogWarning("cpCostText is null!");
             }
         }
 
-        private void UpdateCardType()
+        private void UpdateRarityDisplay()
         {
-            var typeText = cardTypeText ??
-                           transform.Find("CardType")?.GetComponent<TextMeshProUGUI>() ??
-                           transform.Find("Type")?.GetComponent<TextMeshProUGUI>();
-
-            if (typeText != null)
+            if (cardData == null) return;
+            
+            Color rarityColor = GetRarityColor(cardData.rarity);
+            
+            if (rarityIndicator != null)
             {
-                typeText.text = FormatCardType(cardData.cardType);
-                typeText.color = GetCardTypeColor(cardData.cardType);
+                rarityIndicator.color = rarityColor;
+            }
+            else if (cardBackgroundImage != null)
+            {
+                cardBackgroundImage.color = Color.Lerp(Color.white, rarityColor, 0.3f);
             }
         }
 
-        private void UpdateCardArt()
+        private void UpdateAffordabilityDisplay()
         {
-            var artImage = cardArtImage ??
-                           transform.Find("CardArt")?.GetComponent<Image>() ??
-                           transform.Find("Art")?.GetComponent<Image>() ??
-                           transform.Find("Icon")?.GetComponent<Image>();
-
-            if (artImage != null && cardData.cardArt != null)
+            if (cardData == null) return;
+            
+            bool canAfford = CanAffordCard();
+            var resourceManager = Core.ResourceManager.Instance;
+            
+            Debug.Log($"💰 {cardData.cardName}: RP cost={cardData.researchPointCost}, CP cost={cardData.communityPointCost}, Player RP={resourceManager?.ResearchPoints}, Player CP={resourceManager?.CommunityPoints}, CanAfford={canAfford}");
+            
+            // Make card semi-transparent if can't afford
+            if (canvasGroup != null)
             {
-                artImage.sprite = cardData.cardArt;
-                artImage.color = Color.white;
+                canvasGroup.alpha = canAfford ? 1f : 0.6f;
             }
-        }
-
-        private void UpdateCardBackground()
-        {
-            var bgImage = cardBackgroundImage ?? GetComponent<Image>();
-
-            if (bgImage != null)
+            
+            // Update cost text colors - ONLY colors, never text content
+            if (resourceManager != null)
             {
-                // Set background color based on rarity
-                bgImage.color = GetRarityColor(cardData.rarity);
+                // RP cost color - black when affordable, red when not
+                if (rpCostText != null && cardData.researchPointCost > 0)
+                {
+                    Color newColor = resourceManager.ResearchPoints >= cardData.researchPointCost ? Color.black : Color.red;
+                    rpCostText.color = newColor;
+                    Debug.Log($"   RP text color set to: {(newColor == Color.black ? "BLACK" : "RED")}");
+                }
+                
+                // CP cost color - black when affordable, red when not
+                if (cpCostText != null && cardData.communityPointCost > 0)
+                {
+                    Color newColor = resourceManager.CommunityPoints >= cardData.communityPointCost ? Color.black : Color.red;
+                    cpCostText.color = newColor;
+                    Debug.Log($"   CP text color set to: {(newColor == Color.black ? "BLACK" : "RED")}");
+                }
             }
         }
 
         private bool CanAffordCard()
         {
+            if (cardData == null) return false;
+            
             var resourceManager = Core.ResourceManager.Instance;
             return resourceManager != null &&
                    resourceManager.CanSpend(cardData.researchPointCost, cardData.communityPointCost);
         }
 
-        private string FormatCardType(CardType cardType)
+        private string GetCardTypeDisplayName(CardType cardType)
         {
             return cardType switch
             {
@@ -203,46 +278,142 @@ namespace MetaBalance.Cards
         {
             return rarity switch
             {
-                CardRarity.Common => new Color(0.8f, 0.8f, 0.8f, 0.9f), // Light gray
-                CardRarity.Uncommon => new Color(0.2f, 0.8f, 0.2f, 0.9f), // Green
-                CardRarity.Rare => new Color(0.2f, 0.2f, 1f, 0.9f), // Blue
-                CardRarity.Epic => new Color(0.8f, 0.2f, 0.8f, 0.9f), // Purple
-                CardRarity.Special => new Color(1f, 0.8f, 0.2f, 0.9f), // Gold
-                _ => new Color(1f, 1f, 1f, 0.9f)
+                CardRarity.Common => new Color(0.7f, 0.7f, 0.7f), // Gray
+                CardRarity.Uncommon => new Color(0.0f, 1f, 0.0f), // Green
+                CardRarity.Rare => new Color(0.0f, 0.5f, 1f), // Blue
+                CardRarity.Epic => new Color(0.8f, 0.0f, 1f), // Purple
+                CardRarity.Special => new Color(1f, 0.8f, 0.0f), // Gold
+                _ => Color.white
             };
         }
 
-        /// <summary>
-        /// Call this to refresh the card display (useful when resources change)
-        /// </summary>
         public void RefreshDisplay()
         {
             UpdateCardDisplay();
         }
+        
+        public void RefreshAffordabilityOnly()
+        {
+            if (cardData == null) return;
+            
+            Debug.Log($"🔄 Refreshing affordability for {cardData.cardName}");
+            UpdateAffordabilityDisplay();
+        }
+        
+        [ContextMenu("Debug: Test Drag Conditions")]
+        public void DebugTestDragConditions()
+        {
+            Debug.Log("=== DRAG CONDITIONS TEST ===");
+            Debug.Log($"Card: {cardData?.cardName ?? "NULL"}");
+            Debug.Log($"1. draggingEnabled: {draggingEnabled}");
+            Debug.Log($"2. Current Phase: {Core.PhaseManager.Instance?.GetCurrentPhase()}");
+            Debug.Log($"3. Is Planning Phase: {Core.PhaseManager.Instance?.GetCurrentPhase() == Core.GamePhase.Planning}");
+            Debug.Log($"4. Parent: {transform.parent?.name ?? "NULL"}");
+            Debug.Log($"5. IsInDropZone: {IsCardInDropZone()}");
+            Debug.Log($"6. CanAffordCard: {CanAffordCard()}");
+            Debug.Log($"7. Should be draggable: {draggingEnabled && Core.PhaseManager.Instance?.GetCurrentPhase() == Core.GamePhase.Planning && (IsCardInDropZone() || CanAffordCard())}");
+        }
+        
+        [ContextMenu("Debug: Force Enable Dragging")]
+        public void DebugForceEnableDragging()
+        {
+            draggingEnabled = true;
+            Debug.Log($"🔓 FORCE ENABLED dragging for {cardData?.cardName}");
+        }
 
+        // Drag and Drop Implementation
         public void OnBeginDrag(PointerEventData eventData)
         {
+            Debug.Log($"🔍 OnBeginDrag called for {cardData?.cardName ?? "unknown card"}");
+            Debug.Log($"   - draggingEnabled: {draggingEnabled}");
+            Debug.Log($"   - Current phase: {Core.PhaseManager.Instance?.GetCurrentPhase()}");
+            Debug.Log($"   - Parent: {transform.parent?.name ?? "null"}");
+            
+            if (!draggingEnabled) 
+            {
+                Debug.LogError($"❌ DRAGGING BLOCKED: draggingEnabled = false for {cardData?.cardName}");
+                return;
+            }
+            
             // Only allow dragging in Planning phase
             if (Core.PhaseManager.Instance?.GetCurrentPhase() != Core.GamePhase.Planning)
+            {
+                Debug.LogError($"❌ DRAGGING BLOCKED: Not in planning phase (current: {Core.PhaseManager.Instance?.GetCurrentPhase()})");
                 return;
+            }
+            
+            // Only check affordability if card is in hand
+            bool isInDropZone = IsCardInDropZone();
+            Debug.Log($"   - isInDropZone: {isInDropZone}");
+            Debug.Log($"   - Can afford: {CanAffordCard()}");
+            
+            if (!isInDropZone && !CanAffordCard())
+            {
+                Debug.LogError($"❌ DRAGGING BLOCKED: Cannot afford card {cardData?.cardName}");
+                return;
+            }
             
             isDragging = true;
             originalPosition = rectTransform.position;
             originalParent = transform.parent;
             
-            // Make card semi-transparent while dragging
+            // STORE COMPLETE ORIGINAL TRANSFORM STATE
+            StoreOriginalTransformState();
+            
+            string location = isInDropZone ? "drop zone" : "hand";
+            Debug.Log($"✅ SUCCESS: Started dragging {cardData?.cardName} from {location}");
+            
+            // Visual feedback during drag - ONLY change opacity and raycast blocking
             canvasGroup.alpha = 0.7f;
             canvasGroup.blocksRaycasts = false;
             
-            // Bring card to front
+            // Bring to front for dragging - use worldPositionStays to maintain position
             transform.SetParent(canvas.transform, true);
+            transform.SetAsLastSibling();
+            
+            // RESTORE original transform state after parent change
+            RestoreOriginalTransformState();
+        }
+        
+        private Vector2 storedAnchoredPos;
+        private Vector2 storedAnchorMin;
+        private Vector2 storedAnchorMax;
+        private Vector2 storedPivot;
+        private Vector2 storedSizeDelta;
+        private Vector3 storedScale;
+        private Quaternion storedRotation;
+        private Vector2 storedOffsetMin;
+        private Vector2 storedOffsetMax;
+        
+        private void StoreOriginalTransformState()
+        {
+            storedAnchoredPos = rectTransform.anchoredPosition;
+            storedAnchorMin = rectTransform.anchorMin;
+            storedAnchorMax = rectTransform.anchorMax;
+            storedPivot = rectTransform.pivot;
+            storedSizeDelta = rectTransform.sizeDelta;
+            storedScale = rectTransform.localScale;
+            storedRotation = rectTransform.localRotation;
+            storedOffsetMin = rectTransform.offsetMin;
+            storedOffsetMax = rectTransform.offsetMax;
+        }
+        
+        private void RestoreOriginalTransformState()
+        {
+            rectTransform.anchorMin = storedAnchorMin;
+            rectTransform.anchorMax = storedAnchorMax;
+            rectTransform.pivot = storedPivot;
+            rectTransform.sizeDelta = storedSizeDelta;
+            rectTransform.localScale = storedScale;
+            rectTransform.localRotation = storedRotation;
+            rectTransform.offsetMin = storedOffsetMin;
+            rectTransform.offsetMax = storedOffsetMax;
+            rectTransform.anchoredPosition = storedAnchoredPos;
         }
         
         public void OnDrag(PointerEventData eventData)
         {
             if (!isDragging) return;
-            
-            // Move card with mouse/touch
             rectTransform.position = eventData.position;
         }
         
@@ -254,41 +425,147 @@ namespace MetaBalance.Cards
             canvasGroup.alpha = 1f;
             canvasGroup.blocksRaycasts = true;
             
-            // Check if dropped on valid drop zone
-            var dropZone = GetDropZoneUnderPointer(eventData);
+            // Check what we were dragged from and to
+            bool wasInDropZone = IsCardInDropZone(originalParent);
+            bool isInDropZone = transform.parent != canvas.transform && IsCardInDropZone();
+            bool isInHand = transform.parent != canvas.transform && IsCardInHand();
             
-            if (dropZone != null && dropZone.CanAcceptCard(cardData))
+            if (transform.parent == canvas.transform)
             {
-                // Card accepted by drop zone
-                dropZone.AcceptCard(this);
+                // Not accepted, return to original location
+                ReturnToOriginalPosition();
             }
-            else
+            else if (wasInDropZone && isInHand)
             {
-                // Return to original position
-                transform.SetParent(originalParent, true);
-                rectTransform.position = originalPosition;
+                // Moved from drop zone to hand
+                RemoveFromDropZone();
+            }
+            else if (!wasInDropZone && isInDropZone)
+            {
+                // Moved from hand to drop zone
+                if (Cards.CardManager.Instance != null)
+                {
+                    Cards.CardManager.Instance.RemoveCardFromHand(this);
+                }
             }
         }
         
-        private CardDropZone GetDropZoneUnderPointer(PointerEventData eventData)
+        private bool IsCardInDropZone()
         {
-            var results = new System.Collections.Generic.List<RaycastResult>();
-            EventSystem.current.RaycastAll(eventData, results);
+            return IsCardInDropZone(transform.parent);
+        }
+        
+        private bool IsCardInDropZone(Transform parent)
+        {
+            if (parent == null) return false;
             
-            foreach (var result in results)
+            // Check parent hierarchy for CardDropZone
+            Transform current = parent;
+            while (current != null)
             {
-                var dropZone = result.gameObject.GetComponent<CardDropZone>();
-                if (dropZone != null)
-                    return dropZone;
+                if (current.GetComponent<Cards.CardDropZone>() != null)
+                    return true;
+                current = current.parent;
             }
             
-            return null;
+            return false;
+        }
+        
+        private bool IsCardInHand()
+        {
+            return transform.parent.GetComponent<Cards.HandDropZone>() != null;
+        }
+        
+        private void ReturnToOriginalPosition()
+        {
+            // Store current transform properties to preserve them
+            var rect = GetComponent<RectTransform>();
+            Vector2 currentAnchoredPos = rect.anchoredPosition;
+            Vector2 currentAnchorMin = rect.anchorMin;
+            Vector2 currentAnchorMax = rect.anchorMax;
+            Vector2 currentPivot = rect.pivot;
+            Vector2 currentSizeDelta = rect.sizeDelta;
+            Vector3 currentScale = rect.localScale;
+            Quaternion currentRotation = rect.localRotation;
+            Vector2 currentOffsetMin = rect.offsetMin;
+            Vector2 currentOffsetMax = rect.offsetMax;
+            
+            // Return to original parent
+            transform.SetParent(originalParent, true); // Keep world position
+            
+            // Restore ALL transform properties to maintain exact same appearance
+            rect.anchorMin = currentAnchorMin;
+            rect.anchorMax = currentAnchorMax;
+            rect.pivot = currentPivot;
+            rect.sizeDelta = currentSizeDelta;
+            rect.localScale = currentScale;
+            rect.localRotation = currentRotation;
+            rect.offsetMin = currentOffsetMin;
+            rect.offsetMax = currentOffsetMax;
+            rect.anchoredPosition = currentAnchoredPos;
+            rect.position = originalPosition; // Restore exact world position
+            
+            Debug.Log($"✅ Returned {cardData?.cardName} to original position with EXACT same appearance preserved");
+        }
+        
+        private void RemoveFromDropZone()
+        {
+            // Find drop zone and remove card
+            Transform current = originalParent;
+            while (current != null)
+            {
+                var dropZone = current.GetComponent<Cards.CardDropZone>();
+                if (dropZone != null)
+                {
+                    dropZone.RemoveCard(this);
+                    return;
+                }
+                current = current.parent;
+            }
+            
+            // Fallback
+            if (Cards.CardManager.Instance != null)
+            {
+                Cards.CardManager.Instance.ReturnCardToHand(this);
+            }
         }
         
         public void ReturnToHand()
         {
-            transform.SetParent(originalParent, true);
-            rectTransform.position = originalPosition;
+            if (originalParent != null)
+            {
+                // Store current transform properties to preserve them
+                var rect = GetComponent<RectTransform>();
+                Vector2 currentAnchoredPos = rect.anchoredPosition;
+                Vector2 currentAnchorMin = rect.anchorMin;
+                Vector2 currentAnchorMax = rect.anchorMax;
+                Vector2 currentPivot = rect.pivot;
+                Vector2 currentSizeDelta = rect.sizeDelta;
+                Vector3 currentScale = rect.localScale;
+                Quaternion currentRotation = rect.localRotation;
+                Vector2 currentOffsetMin = rect.offsetMin;
+                Vector2 currentOffsetMax = rect.offsetMax;
+                Vector3 currentWorldPosition = rect.position;
+                
+                // Return to original parent
+                transform.SetParent(originalParent, true); // Keep world position
+                
+                // Restore ALL transform properties to maintain exact same appearance
+                rect.anchorMin = currentAnchorMin;
+                rect.anchorMax = currentAnchorMax;
+                rect.pivot = currentPivot;
+                rect.sizeDelta = currentSizeDelta;
+                rect.localScale = currentScale;
+                rect.localRotation = currentRotation;
+                rect.offsetMin = currentOffsetMin;
+                rect.offsetMax = currentOffsetMax;
+                rect.anchoredPosition = currentAnchoredPos;
+                rect.position = currentWorldPosition; // Restore exact world position
+                
+                draggingEnabled = true;
+                
+                Debug.Log($"✅ Returned {cardData?.cardName} to hand with EXACT same appearance preserved");
+            }
         }
     }
 }
