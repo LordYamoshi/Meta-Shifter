@@ -1,270 +1,277 @@
 using UnityEngine;
 using System.Collections.Generic;
-using MetaBalance.Core;
-using UnityEngine.Events;
 using System.Linq;
+using UnityEngine.Events;
 
 namespace MetaBalance.Cards
 {
     /// <summary>
-    /// Manages cards in the game
+    /// Manages player hand, deck, and card playing
     /// </summary>
     public class CardManager : MonoBehaviour
     {
-        [Header("Card Collections")]
-        [SerializeField] private List<CardData> cardDatabase = new List<CardData>();
-        [SerializeField] private CardPoolSettings cardPoolSettings;
+        public static CardManager Instance { get; private set; }
         
-        [Header("Card Display")]
-        [SerializeField] private CardDisplay cardDisplayPrefab;
-        [SerializeField] private Transform handContainer;
-        [SerializeField] private Transform playArea;
+        [Header("Card Database")]
+        [SerializeField] private List<CardData> allAvailableCards = new List<CardData>();
         
-        [Header("Draw Settings")]
+        [Header("Player Collection")]
+        [SerializeField] private List<CardData> playerDeck = new List<CardData>();
+        [SerializeField] private List<CardData> currentHand = new List<CardData>();
+        
+        [Header("Settings")]
         [SerializeField] private int maxHandSize = 7;
-        [SerializeField] private int cardsPerDraw = 3;
+        [SerializeField] private int cardsPerPhase = 2;
+        [SerializeField] private int startingDeckSize = 20;
         
         [Header("Events")]
-        public UnityEvent<CardInstance> onCardPlayed;
-        public UnityEvent<CardInstance> onCardDiscarded;
-        public UnityEvent<List<CardInstance>> onHandUpdated;
+        public UnityEvent<List<CardData>> OnHandChanged;
+        public UnityEvent<CardData> OnCardPlayed;
+        public UnityEvent<List<CardData>> OnCardsEarned;
         
-        // Runtime state
-        private List<CardData> _availableCardPool = new List<CardData>();
-        private List<CardInstance> _hand = new List<CardInstance>();
-        private List<CardInstance> _playedCards = new List<CardInstance>();
-        private List<CardInstance> _discardedCards = new List<CardInstance>();
-        
-        // Card displays
-        private Dictionary<string, CardDisplay> _cardDisplays = new Dictionary<string, CardDisplay>();
+        private void Awake()
+        {
+            if (Instance != null && Instance != this)
+            {
+                Destroy(gameObject);
+                return;
+            }
+            Instance = this;
+        }
         
         private void Start()
         {
-            // Subscribe to game phase changes
-            GameManager.Instance.onPhaseChanged.AddListener(OnGamePhaseChanged);
+            // Subscribe to phase changes
+            if (Core.PhaseManager.Instance != null)
+            {
+                Core.PhaseManager.Instance.OnPhaseChanged.AddListener(OnPhaseChanged);
+            }
             
-            // Initialize card pool
-            InitializeCardPool();
+            BuildStartingDeck();
+            DrawInitialHand();
+        }
+        
+        private void BuildStartingDeck()
+        {
+            playerDeck.Clear();
             
-            // Draw initial hand
+            // Add basic cards of each type
+            var commonCards = allAvailableCards.Where(card => card.rarity == CardRarity.Common).ToList();
+            
+            // Add random common cards to reach starting deck size
+            for (int i = 0; i < startingDeckSize && commonCards.Count > 0; i++)
+            {
+                var randomCard = commonCards[Random.Range(0, commonCards.Count)];
+                playerDeck.Add(randomCard);
+            }
+            
+            ShuffleDeck();
+            Debug.Log($"Built starting deck with {playerDeck.Count} cards");
+        }
+        
+        private void DrawInitialHand()
+        {
             DrawCards(maxHandSize);
         }
         
-        private void OnDestroy()
+        private void OnPhaseChanged(Core.GamePhase newPhase)
         {
-            // Unsubscribe from game phase changes
-            if (GameManager.Instance != null)
+            if (newPhase == Core.GamePhase.Planning)
             {
-                GameManager.Instance.onPhaseChanged.RemoveListener(OnGamePhaseChanged);
+                // Draw new cards and earn cards each planning phase
+                EarnNewCards();
+                DrawCards(cardsPerPhase);
             }
         }
         
-        private void InitializeCardPool()
+        private void EarnNewCards()
         {
-            // Clear pool
-            _availableCardPool.Clear();
+            List<CardData> earnedCards = new List<CardData>();
             
-            // Filter database by settings
-            foreach (CardData card in cardDatabase)
+            // Determine how many cards to earn (base + performance bonus)
+            int cardsToEarn = cardsPerPhase;
+            
+            // Get current week to determine what rarities are available
+            int currentWeek = Core.PhaseManager.Instance?.GetCurrentWeek() ?? 1;
+            
+            for (int i = 0; i < cardsToEarn; i++)
             {
-                // Add appropriate number of copies based on rarity
-                int copies = GetCardCopiesByRarity(card.rarity);
-                for (int i = 0; i < copies; i++)
+                CardData newCard = SelectRandomCard(currentWeek);
+                if (newCard != null)
                 {
-                    _availableCardPool.Add(card);
+                    playerDeck.Add(newCard);
+                    earnedCards.Add(newCard);
                 }
             }
             
-            // Shuffle the pool
-            ShuffleCardPool();
+            if (earnedCards.Count > 0)
+            {
+                OnCardsEarned.Invoke(earnedCards);
+                Debug.Log($"Earned {earnedCards.Count} new cards: {string.Join(", ", earnedCards.Select(c => c.cardName))}");
+            }
         }
         
-        private int GetCardCopiesByRarity(CardRarity rarity)
+        private CardData SelectRandomCard(int currentWeek)
         {
-            // Higher rarities have fewer copies
-            return rarity switch
+            // Filter cards by what should be available at current week
+            var availableCards = allAvailableCards.Where(card => IsCardAvailable(card, currentWeek)).ToList();
+            
+            if (availableCards.Count == 0) return null;
+            
+            // Weight by rarity (common cards more likely)
+            var weightedCards = new List<(CardData card, float weight)>();
+            
+            foreach (var card in availableCards)
             {
-                CardRarity.Common => cardPoolSettings.commonCardCopies,
-                CardRarity.Uncommon => cardPoolSettings.uncommonCardCopies,
-                CardRarity.Rare => cardPoolSettings.rareCardCopies,
-                CardRarity.Epic => cardPoolSettings.epicCardCopies,
-                CardRarity.Special => cardPoolSettings.specialCardCopies,
-                _ => 1
+                float weight = card.rarity switch
+                {
+                    CardRarity.Common => 0.5f,
+                    CardRarity.Uncommon => 0.3f,
+                    CardRarity.Rare => 0.15f,
+                    CardRarity.Epic => 0.04f,
+                    CardRarity.Special => 0.01f,
+                    _ => 0.1f
+                };
+                
+                weightedCards.Add((card, weight));
+            }
+            
+            // Select based on weighted random
+            float totalWeight = weightedCards.Sum(w => w.weight);
+            float randomValue = Random.Range(0f, totalWeight);
+            
+            float currentWeight = 0f;
+            foreach (var (card, weight) in weightedCards)
+            {
+                currentWeight += weight;
+                if (randomValue <= currentWeight)
+                {
+                    return card;
+                }
+            }
+            
+            return availableCards[Random.Range(0, availableCards.Count)];
+        }
+        
+        private bool IsCardAvailable(CardData card, int currentWeek)
+        {
+            // Unlock cards based on week and rarity
+            return card.rarity switch
+            {
+                CardRarity.Common => true,
+                CardRarity.Uncommon => currentWeek >= 2,
+                CardRarity.Rare => currentWeek >= 4,
+                CardRarity.Epic => currentWeek >= 6,
+                CardRarity.Special => currentWeek >= 8,
+                _ => false
             };
-        }
-        
-        private void ShuffleCardPool()
-        {
-            // Fisher-Yates shuffle
-            for (int i = _availableCardPool.Count - 1; i > 0; i--)
-            {
-                int j = Random.Range(0, i + 1);
-                CardData temp = _availableCardPool[i];
-                _availableCardPool[i] = _availableCardPool[j];
-                _availableCardPool[j] = temp;
-            }
-        }
-        
-        private void OnGamePhaseChanged(GamePhase newPhase)
-        {
-            if (newPhase == GamePhase.Planning)
-            {
-                // Draw new cards at the start of Planning phase
-                DrawCards(cardsPerDraw);
-            }
         }
         
         public void DrawCards(int count)
         {
-            // Don't draw more than max hand size
-            int cardsToDraw = Mathf.Min(count, maxHandSize - _hand.Count);
-            
-            if (cardsToDraw <= 0)
-                return;
-                
-            // Check if we need to reshuffle
-            if (_availableCardPool.Count < cardsToDraw)
+            for (int i = 0; i < count && currentHand.Count < maxHandSize; i++)
             {
-                // Move discarded cards back to available pool
-                _availableCardPool.AddRange(_discardedCards.Select(c => c.cardData));
-                _discardedCards.Clear();
-                
-                // Shuffle the pool
-                ShuffleCardPool();
-                
-                // If still not enough cards, adjust draw count
-                cardsToDraw = Mathf.Min(cardsToDraw, _availableCardPool.Count);
-            }
-            
-            // Draw cards
-            for (int i = 0; i < cardsToDraw; i++)
-            {
-                // Draw a card from the pool
-                CardData cardData = _availableCardPool[0];
-                _availableCardPool.RemoveAt(0);
-                
-                // Create card instance
-                CardInstance cardInstance = new CardInstance(cardData);
-                _hand.Add(cardInstance);
-                
-                // Create visual
-                CreateCardVisual(cardInstance);
-            }
-            
-            // Notify listeners
-            onHandUpdated.Invoke(_hand);
-            
-            // Arrange hand
-            ArrangeHand();
-        }
-        
-        private void CreateCardVisual(CardInstance cardInstance)
-        {
-            // Instantiate card visual
-            CardDisplay cardDisplay = Instantiate(cardDisplayPrefab, handContainer);
-            
-            // Set up the card
-            cardDisplay.SetupCard(cardInstance, this);
-            
-            // Store reference
-            _cardDisplays[cardInstance.id] = cardDisplay;
-        }
-        
-        private void ArrangeHand()
-        {
-            // Position cards in an arc
-            float arcWidth = _hand.Count * 1.2f;
-            float arcHeight = 0.5f;
-            
-            for (int i = 0; i < _hand.Count; i++)
-            {
-                CardInstance card = _hand[i];
-                if (_cardDisplays.TryGetValue(card.id, out CardDisplay display))
+                if (playerDeck.Count == 0)
                 {
-                    // Calculate position in arc
-                    float t = _hand.Count > 1 ? i / (_hand.Count - 1f) : 0.5f;
-                    float x = Mathf.Lerp(-arcWidth/2, arcWidth/2, t);
-                    float y = arcHeight * Mathf.Sin(Mathf.PI * t);
-                    
-                    // Set position
-                    display.SetTargetPosition(new Vector3(x, y, 0));
-                    
-                    // Set rotation
-                    float angle = Mathf.Lerp(-15, 15, t);
-                    display.SetTargetRotation(Quaternion.Euler(0, 0, angle));
-                    
-                    // Set depth order
-                    display.SetDepthOffset(-i * 0.01f);
-                }
-            }
-        }
-        
-        public void PlayCard(CardInstance card)
-        {
-            if (!_hand.Contains(card))
-                return;
-                
-            // Try to spend resources
-            ResourceManager resourceManager = ResourceManager.Instance;
-            if (!resourceManager.CanSpend(card.cardData.researchPointCost, card.cardData.communityPointCost))
-            {
-                // Not enough resources
-                Debug.Log($"Not enough resources to play {card.cardData.cardName}");
-                return;
-            }
-            
-            // Spend resources
-            resourceManager.SpendResources(card.cardData.researchPointCost, card.cardData.communityPointCost);
-            
-            // Play the card
-            if (card.Play())
-            {
-                // Move from hand to played pile
-                _hand.Remove(card);
-                _playedCards.Add(card);
-                
-                // Handle visual
-                if (_cardDisplays.TryGetValue(card.id, out CardDisplay display))
-                {
-                    display.PlayAnimation();
+                    Debug.Log("No more cards in deck to draw");
+                    break;
                 }
                 
-                // Notify listeners
-                onCardPlayed.Invoke(card);
-                onHandUpdated.Invoke(_hand);
-                
-                // Rearrange hand
-                ArrangeHand();
+                // Draw from deck
+                var drawnCard = playerDeck[0];
+                playerDeck.RemoveAt(0);
+                currentHand.Add(drawnCard);
             }
-            else
+            
+            OnHandChanged.Invoke(currentHand);
+            Debug.Log($"Drew {count} cards. Hand size: {currentHand.Count}");
+        }
+        
+        public bool PlayCard(CardData card)
+        {
+            if (!currentHand.Contains(card))
             {
-                // Failed to play, refund resources
-                resourceManager.AddResources(card.cardData.researchPointCost, card.cardData.communityPointCost);
+                Debug.Log("Card not in hand!");
+                return false;
+            }
+            
+            // Check if player can afford the card
+            var resourceManager = Core.ResourceManager.Instance;
+            if (resourceManager == null || !resourceManager.CanSpend(card.researchPointCost, card.communityPointCost))
+            {
+                Debug.Log($"Cannot afford {card.cardName}: needs {card.researchPointCost} RP, {card.communityPointCost} CP");
+                return false;
+            }
+            
+            // Pay the cost
+            resourceManager.SpendResources(card.researchPointCost, card.communityPointCost);
+            
+            // Play the card effect
+            card.PlayCard();
+            
+            // Remove from hand
+            currentHand.Remove(card);
+            
+            OnCardPlayed.Invoke(card);
+            OnHandChanged.Invoke(currentHand);
+            
+            Debug.Log($"Played {card.cardName}");
+            return true;
+        }
+        
+        public bool PlayCardByIndex(int handIndex)
+        {
+            if (handIndex < 0 || handIndex >= currentHand.Count)
+            {
+                Debug.Log($"Invalid hand index: {handIndex}");
+                return false;
+            }
+            
+            return PlayCard(currentHand[handIndex]);
+        }
+        
+        private void ShuffleDeck()
+        {
+            for (int i = playerDeck.Count - 1; i > 0; i--)
+            {
+                int randomIndex = Random.Range(0, i + 1);
+                var temp = playerDeck[i];
+                playerDeck[i] = playerDeck[randomIndex];
+                playerDeck[randomIndex] = temp;
             }
         }
         
-        public void DiscardCard(CardInstance card)
+        // Public getters
+        public List<CardData> GetCurrentHand() => new List<CardData>(currentHand);
+        public List<CardData> GetDeck() => new List<CardData>(playerDeck);
+        public int GetHandSize() => currentHand.Count;
+        public int GetDeckSize() => playerDeck.Count;
+        
+        // Debug methods
+        [ContextMenu("Draw Card")]
+        public void DebugDrawCard()
         {
-            if (!_hand.Contains(card))
-                return;
-                
-            // Move from hand to discard pile
-            _hand.Remove(card);
-            _discardedCards.Add(card);
-            
-            // Handle visual
-            if (_cardDisplays.TryGetValue(card.id, out CardDisplay display))
+            DrawCards(1);
+        }
+        
+        [ContextMenu("Play First Card")]
+        public void DebugPlayFirstCard()
+        {
+            if (currentHand.Count > 0)
             {
-                display.DiscardAnimation();
-                _cardDisplays.Remove(card.id);
+                PlayCard(currentHand[0]);
             }
-            
-            // Notify listeners
-            onCardDiscarded.Invoke(card);
-            onHandUpdated.Invoke(_hand);
-            
-            // Rearrange hand
-            ArrangeHand();
+        }
+        
+        [ContextMenu("Add Random Card to Deck")]
+        public void DebugAddRandomCard()
+        {
+            if (allAvailableCards.Count > 0)
+            {
+                var randomCard = allAvailableCards[Random.Range(0, allAvailableCards.Count)];
+                playerDeck.Add(randomCard);
+                Debug.Log($"Added {randomCard.cardName} to deck");
+            }
         }
     }
 }

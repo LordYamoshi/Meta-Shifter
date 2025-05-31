@@ -5,256 +5,197 @@ using UnityEngine.Events;
 namespace MetaBalance.Characters
 {
     /// <summary>
-    /// Manages all characters in the game
+    /// Manages character stats and win rates
     /// </summary>
     public class CharacterManager : MonoBehaviour
     {
-        // Singleton instance
         public static CharacterManager Instance { get; private set; }
         
-        [Header("Character Database")]
-        [SerializeField] private List<CharacterData> characterDatabase = new List<CharacterData>();
-        
-        [Header("Spawning")]
-        [SerializeField] private Transform characterParent;
-        [SerializeField] private List<Transform> spawnPositions = new List<Transform>();
-        
-        [Header("Win Rate Calculation")]
-        [SerializeField] private float balanceTargetWinRate = 50f;
-        [SerializeField] private float winRateRandomVariation = 2f;
-        [SerializeField] private float popularityImpact = 0.25f;
+        [Header("Character Stats")]
+        [SerializeField] private List<CharacterData> characterDatabase;
         
         [Header("Events")]
-        public UnityEvent<GameCharacter> onCharacterSelected;
-        public UnityEvent<GameCharacter> onCharacterStatsChanged;
-        public UnityEvent onAllCharactersUpdated;
+        public UnityEvent<CharacterType, CharacterStat, float> OnStatChanged; // Character, Stat, NewValue
+        public UnityEvent<float> OnOverallBalanceChanged; // Overall balance score
         
-        // Active characters
-        private Dictionary<CharacterType, GameCharacter> _characters = new Dictionary<CharacterType, GameCharacter>();
-        
-        // Currently selected character
-        private GameCharacter _selectedCharacter;
+        // Runtime character data
+        private Dictionary<CharacterType, Dictionary<CharacterStat, float>> characterStats = 
+            new Dictionary<CharacterType, Dictionary<CharacterStat, float>>();
         
         private void Awake()
         {
-            // Singleton setup
             if (Instance != null && Instance != this)
             {
                 Destroy(gameObject);
                 return;
             }
-            
             Instance = this;
         }
         
         private void Start()
         {
-            // Initialize characters
             InitializeCharacters();
-        }
-        
-        private void Update()
-        {
-            // Update all characters
-            foreach (var character in _characters.Values)
-            {
-                character.Update();
-            }
         }
         
         private void InitializeCharacters()
         {
-            // Create characters from database
-            int spawnIndex = 0;
-            foreach (CharacterData data in characterDatabase)
+            // Initialize all characters with base stats
+            foreach (CharacterType type in System.Enum.GetValues(typeof(CharacterType)))
             {
-                // Create character
-                GameCharacter character = new GameCharacter(data);
+                characterStats[type] = new Dictionary<CharacterStat, float>();
                 
-                // Store reference
-                _characters[data.characterType] = character;
-                
-                // Spawn visual
-                if (spawnPositions.Count > spawnIndex)
-                {
-                    character.SpawnVisual(characterParent, spawnPositions[spawnIndex].position);
-                    spawnIndex++;
-                }
-                else
-                {
-                    Debug.LogWarning($"Not enough spawn positions for character {data.characterName}");
-                }
+                // Set base stats
+                characterStats[type][CharacterStat.Health] = 50f;
+                characterStats[type][CharacterStat.Damage] = 50f;
+                characterStats[type][CharacterStat.Speed] = 50f;
+                characterStats[type][CharacterStat.Utility] = 50f;
+                characterStats[type][CharacterStat.WinRate] = 50f + Random.Range(-5f, 5f);
+                characterStats[type][CharacterStat.Popularity] = 50f + Random.Range(-10f, 10f);
             }
             
-            // Initial win rate calculation
-            RecalculateWinRates();
+            Debug.Log("Characters initialized with base stats");
+        }
+        
+        public float GetStat(CharacterType character, CharacterStat stat)
+        {
+            if (characterStats.ContainsKey(character) && characterStats[character].ContainsKey(stat))
+            {
+                return characterStats[character][stat];
+            }
+            return 50f; // Default value
+        }
+        
+        public void ModifyStat(CharacterType character, CharacterStat stat, float percentageChange)
+        {
+            if (!characterStats.ContainsKey(character))
+                return;
             
-            // Select first character by default
-            if (_characters.Count > 0)
-            {
-                SelectCharacter(characterDatabase[0].characterType);
-            }
-        }
-        
-        public void SelectCharacter(CharacterType type)
-        {
-            if (_characters.TryGetValue(type, out GameCharacter character))
-            {
-                _selectedCharacter = character;
-                onCharacterSelected.Invoke(character);
-                
-                // Play selection sound if available
-                if (character.Visual != null && character.Data.selectionSound != null)
-                {
-                    AudioSource audio = character.Visual.GetComponent<AudioSource>();
-                    if (audio != null)
-                    {
-                        audio.PlayOneShot(character.Data.selectionSound);
-                    }
-                }
-            }
-        }
-        
-        public GameCharacter GetCharacter(CharacterType type)
-        {
-            if (_characters.TryGetValue(type, out GameCharacter character))
-            {
-                return character;
-            }
+            float currentValue = GetStat(character, stat);
+            float change = currentValue * (percentageChange / 100f);
+            float newValue = currentValue + change;
             
-            return null;
-        }
-        
-        public GameCharacter GetSelectedCharacter()
-        {
-            return _selectedCharacter;
-        }
-        
-        public void ModifyCharacterStat(CharacterType type, CharacterStat stat, float percentageChange)
-        {
-            if (_characters.TryGetValue(type, out GameCharacter character))
+            // Clamp values to reasonable ranges
+            newValue = stat switch
             {
-                // Apply change
-                character.ModifyStat(stat, percentageChange);
-                
-                // Notify listeners
-                onCharacterStatsChanged.Invoke(character);
-                
-                // Recalculate win rates if needed
-                if (stat != CharacterStat.WinRate)
-                {
-                    RecalculateWinRates();
-                }
+                CharacterStat.WinRate => Mathf.Clamp(newValue, 20f, 80f),
+                CharacterStat.Popularity => Mathf.Clamp(newValue, 0f, 100f),
+                _ => Mathf.Max(10f, newValue) // Other stats minimum 10
+            };
+            
+            characterStats[character][stat] = newValue;
+            
+            OnStatChanged.Invoke(character, stat, newValue);
+            
+            Debug.Log($"{character} {stat}: {currentValue:F1} -> {newValue:F1} ({percentageChange:+0.0;-0.0}%)");
+            
+            // Recalculate win rates if other stats changed
+            if (stat != CharacterStat.WinRate && stat != CharacterStat.Popularity)
+            {
+                RecalculateWinRates();
             }
         }
         
         public void RecalculateWinRates()
         {
-            // Calculate relative strength values
-            Dictionary<CharacterType, float> strengthValues = new Dictionary<CharacterType, float>();
+            // Simple win rate calculation based on relative power
+            Dictionary<CharacterType, float> powerLevels = new Dictionary<CharacterType, float>();
             
-            foreach (var character in _characters.Values)
+            // Calculate power level for each character
+            foreach (CharacterType type in System.Enum.GetValues(typeof(CharacterType)))
             {
-                // Calculate strength based on stats
-                float healthValue = character.GetStat(CharacterStat.Health) * 0.3f;
-                float damageValue = character.GetStat(CharacterStat.Damage) * 0.4f;
-                float speedValue = character.GetStat(CharacterStat.Speed) * 0.15f;
-                float utilityValue = character.GetStat(CharacterStat.Utility) * 0.15f;
+                float health = GetStat(type, CharacterStat.Health);
+                float damage = GetStat(type, CharacterStat.Damage);
+                float speed = GetStat(type, CharacterStat.Speed);
+                float utility = GetStat(type, CharacterStat.Utility);
                 
-                float strength = healthValue + damageValue + speedValue + utilityValue;
-                strengthValues[character.GetCharacterType()] = strength;
+                // Weighted power calculation
+                float power = (health * 0.3f) + (damage * 0.4f) + (speed * 0.15f) + (utility * 0.15f);
+                powerLevels[type] = power;
             }
             
-            // Calculate total strength
-            float totalStrength = 0f;
-            foreach (var strength in strengthValues.Values)
+            // Calculate average power
+            float totalPower = 0f;
+            foreach (var power in powerLevels.Values)
+                totalPower += power;
+            float avgPower = totalPower / powerLevels.Count;
+            
+            // Adjust win rates based on power relative to average
+            foreach (CharacterType type in System.Enum.GetValues(typeof(CharacterType)))
             {
-                totalStrength += strength;
+                float relativePower = powerLevels[type] / avgPower;
+                float targetWinRate = 50f * relativePower;
+                
+                // Smooth transition to new win rate
+                float currentWinRate = GetStat(type, CharacterStat.WinRate);
+                float newWinRate = Mathf.Lerp(currentWinRate, targetWinRate, 0.3f);
+                
+                // Add some randomness
+                newWinRate += Random.Range(-2f, 2f);
+                newWinRate = Mathf.Clamp(newWinRate, 25f, 75f);
+                
+                characterStats[type][CharacterStat.WinRate] = newWinRate;
+                OnStatChanged.Invoke(type, CharacterStat.WinRate, newWinRate);
             }
             
-            // Update win rates
-            foreach (var character in _characters.Values)
-            {
-                CharacterType type = character.GetCharacterType();
-                
-                // Calculate expected win rate
-                float relativeStrength = strengthValues[type] / totalStrength;
-                float expectedWinRate = relativeStrength * (balanceTargetWinRate * 2f);
-                
-                // Blend with current win rate to prevent wild swings
-                float currentWinRate = character.GetStat(CharacterStat.WinRate);
-                float newWinRate = (currentWinRate * 0.7f) + (expectedWinRate * 0.3f);
-                
-                // Apply random variation
-                newWinRate += Random.Range(-winRateRandomVariation, winRateRandomVariation);
-                
-                // Apply popularity factor - less popular characters often perform better in the hands of specialists
-                float popularity = character.GetStat(CharacterStat.Popularity);
-                float popularityFactor = (balanceTargetWinRate - popularity) * popularityImpact;
-                newWinRate += popularityFactor;
-                
-                // Set new win rate
-                character.SetStat(CharacterStat.WinRate, newWinRate);
-                
-                // Notify listeners
-                onCharacterStatsChanged.Invoke(character);
-            }
+            // Calculate overall balance score
+            float balanceScore = CalculateOverallBalance();
+            OnOverallBalanceChanged.Invoke(balanceScore);
             
-            // Notify that all characters were updated
-            onAllCharactersUpdated.Invoke();
+            Debug.Log($"Win rates recalculated. Balance score: {balanceScore:F1}");
         }
         
-        public void ResetAllCharacters()
+        public float CalculateOverallBalance()
         {
-            foreach (var character in _characters.Values)
+            // Calculate how balanced all characters are (closer win rates = better balance)
+            float totalDeviation = 0f;
+            int characterCount = 0;
+            
+            foreach (CharacterType type in System.Enum.GetValues(typeof(CharacterType)))
             {
-                character.ResetStats();
-                
-                // Notify listeners
-                onCharacterStatsChanged.Invoke(character);
+                float winRate = GetStat(type, CharacterStat.WinRate);
+                float deviation = Mathf.Abs(winRate - 50f);
+                totalDeviation += deviation;
+                characterCount++;
             }
             
-            // Recalculate win rates
-            RecalculateWinRates();
+            if (characterCount == 0) return 50f;
+            
+            float avgDeviation = totalDeviation / characterCount;
+            float balanceScore = Mathf.Max(0f, 100f - (avgDeviation * 2f));
+            
+            return balanceScore;
         }
         
-        /// <summary>
-        /// Calculate average player satisfaction based on character balance and popularity
-        /// </summary>
-        public float CalculatePlayerSatisfaction()
+        public Dictionary<CharacterType, float> GetAllWinRates()
         {
-            if (_characters.Count == 0)
-                return 0.5f;
-                
-            float totalSatisfaction = 0f;
-            
-            foreach (var character in _characters.Values)
+            Dictionary<CharacterType, float> winRates = new Dictionary<CharacterType, float>();
+            foreach (CharacterType type in System.Enum.GetValues(typeof(CharacterType)))
             {
-                // Balance factor (how close to 50% win rate)
-                float winRate = character.GetStat(CharacterStat.WinRate);
-                float balance = 1f - (Mathf.Abs(winRate - balanceTargetWinRate) / 50f);
-                
-                // Popularity factor
-                float popularity = character.GetStat(CharacterStat.Popularity) / 100f;
-                
-                // Higher popularity characters have more impact on satisfaction
-                float characterSatisfaction = (balance * 0.7f) + (popularity * 0.3f);
-                totalSatisfaction += characterSatisfaction * popularity;
+                winRates[type] = GetStat(type, CharacterStat.WinRate);
             }
-            
-            // Normalize by sum of popularities
-            float totalPopularity = 0f;
-            foreach (var character in _characters.Values)
-            {
-                totalPopularity += character.GetStat(CharacterStat.Popularity) / 100f;
-            }
-            
-            if (totalPopularity > 0f)
-            {
-                return totalSatisfaction / totalPopularity;
-            }
-            
-            return 0.5f;
+            return winRates;
         }
+        
+        public Dictionary<CharacterType, Dictionary<CharacterStat, float>> GetAllStats()
+        {
+            return new Dictionary<CharacterType, Dictionary<CharacterStat, float>>(characterStats);
+        }
+    }
+    
+    /// <summary>
+    /// ScriptableObject for character base data
+    /// </summary>
+    [CreateAssetMenu(fileName = "CharacterData", menuName = "Meta Balance/Character Data")]
+    public class CharacterData : ScriptableObject
+    {
+        public CharacterType characterType;
+        public string characterName;
+        public string description;
+        
+        [Header("Base Stats")]
+        public float baseHealth = 50f;
+        public float baseDamage = 50f;
+        public float baseSpeed = 50f;
+        public float baseUtility = 50f;
     }
 }
