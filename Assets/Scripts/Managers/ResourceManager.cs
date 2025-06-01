@@ -22,6 +22,9 @@ namespace MetaBalance.Core
         [SerializeField] private int rpPerWeek = 10;
         [SerializeField] private int cpPerWeek = 5;
         
+        public int RPPerWeek => rpPerWeek;
+        public int CPPerWeek => cpPerWeek;
+        
         [Header("Events")]
         public UnityEvent<int, int> OnResourcesChanged; // RP, CP
         public UnityEvent<int, int> OnResourcesGenerated; // RP, CP gained

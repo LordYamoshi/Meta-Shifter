@@ -7,7 +7,7 @@ using UnityEngine.Events;
 namespace MetaBalance.Cards
 {
     /// <summary>
-    /// Fixed drop zone that properly handles card dropping
+    /// Complete CardDropZone with resource preview integration
     /// </summary>
     public class CardDropZone : MonoBehaviour, IDropHandler, IPointerEnterHandler, IPointerExitHandler
     {
@@ -59,6 +59,9 @@ namespace MetaBalance.Cards
             Debug.Log($"CardDropZone initialized on {gameObject.name}, using container: {cardContainer?.name ?? "null"}");
         }
         
+        /// <summary>
+        /// Enhanced CanAcceptCard that considers total queue cost including current card
+        /// </summary>
         public bool CanAcceptCard(CardData cardData)
         {
             // Check if we have space
@@ -66,9 +69,6 @@ namespace MetaBalance.Cards
             
             // Check if we're in planning phase
             bool isPlanning = Core.PhaseManager.Instance?.GetCurrentPhase() == Core.GamePhase.Planning;
-            
-            // Check if player can afford this card
-            bool canAfford = Core.ResourceManager.Instance?.CanSpend(cardData.researchPointCost, cardData.communityPointCost) ?? false;
             
             // Calculate total cost of all queued cards + this new card
             int totalRP = cardData.researchPointCost;
@@ -86,11 +86,11 @@ namespace MetaBalance.Cards
             // Check if player can afford ALL queued cards including this one
             bool canAffordTotal = Core.ResourceManager.Instance?.CanSpend(totalRP, totalCP) ?? false;
             
-            Debug.Log($"CanAcceptCard {cardData.cardName}: hasSpace={hasSpace}, isPlanning={isPlanning}, canAfford={canAfford}, canAffordTotal={canAffordTotal}");
+            Debug.Log($"CanAcceptCard {cardData.cardName}: hasSpace={hasSpace}, isPlanning={isPlanning}, canAffordTotal={canAffordTotal}");
             Debug.Log($"  Current resources: RP={Core.ResourceManager.Instance?.ResearchPoints}, CP={Core.ResourceManager.Instance?.CommunityPoints}");
             Debug.Log($"  Total cost if added: RP={totalRP}, CP={totalCP}");
             
-            return hasSpace && isPlanning && canAfford && canAffordTotal;
+            return hasSpace && isPlanning && canAffordTotal;
         }
         
         public void OnDrop(PointerEventData eventData)
@@ -152,6 +152,9 @@ namespace MetaBalance.Cards
             SetNormalAppearance();
         }
         
+        /// <summary>
+        /// Accept a card into the drop zone and trigger resource updates
+        /// </summary>
         public void AcceptCard(DraggableCard card)
         {
             if (!CanAcceptCard(card.CardData)) 
@@ -165,70 +168,23 @@ namespace MetaBalance.Cards
             // Add to queued cards FIRST
             queuedCards.Add(card);
             
-            // ABSOLUTE POSITION PRESERVATION: Store world position and size
-            var rect = card.GetComponent<RectTransform>();
-            Vector3 originalWorldPosition = rect.position;
-            Vector2 originalSize = rect.rect.size;
-            Vector2 originalSizeDelta = rect.sizeDelta;
-            Vector3 originalScale = rect.localScale;
-            
-            Debug.Log($"🔒 BEFORE SetParent: WorldPos={originalWorldPosition}, Size={originalSize}, SizeDelta={originalSizeDelta}, Scale={originalScale}");
-            
             // Set parent to the cardContainer
             Transform targetParent = cardContainer != null ? cardContainer.transform : this.transform;
-            card.transform.SetParent(targetParent, true); // Keep world position
-            
-            // FORCE restore exact same visual properties
-            rect.position = originalWorldPosition;
-            rect.sizeDelta = originalSizeDelta;
-            rect.localScale = originalScale;
-            
-            Debug.Log($"🔒 AFTER restore: WorldPos={rect.position}, Size={rect.rect.size}, SizeDelta={rect.sizeDelta}, Scale={rect.localScale}");
+            card.transform.SetParent(targetParent, true);
             
             // Enable dragging if in planning phase
             bool isPlanning = Core.PhaseManager.Instance?.GetCurrentPhase() == Core.GamePhase.Planning;
             card.SetDraggingEnabled(isPlanning);
             
-            // Notify listeners
+            // *** TRIGGER RESOURCE PREVIEW UPDATE ***
             OnCardsChanged.Invoke(GetQueuedCardData());
             
-            Debug.Log($"✅ Card {card.CardData.cardName} added to drop zone with EXACT same appearance");
+            Debug.Log($"✅ Card {card.CardData.cardName} added to drop zone - resource preview updated");
         }
         
-        private void PositionCardInDropZone(DraggableCard card, int index)
-        {
-            // Check if the card container has a Grid Layout Group
-            var gridLayout = cardContainer.GetComponent<GridLayoutGroup>();
-            
-            if (gridLayout != null)
-            {
-                // Grid Layout Group will handle positioning automatically
-                // Just make sure the card is properly parented - no manual positioning needed
-                Debug.Log($"Card {card.CardData.cardName} added to grid at index {index} - Grid Layout will handle positioning");
-                return;
-            }
-            
-            // Fallback: Manual positioning if no Grid Layout Group
-            var rectTransform = card.GetComponent<RectTransform>();
-            
-            // COMPLETELY PRESERVE the card's transform - don't change ANYTHING
-            // Just change the X position for side-by-side layout
-            float cardActualWidth = rectTransform.rect.width;
-            if (cardActualWidth <= 0) cardActualWidth = cardWidth; // fallback
-            
-            float totalWidth = (queuedCards.Count * cardActualWidth) + ((queuedCards.Count - 1) * cardSpacing);
-            float startX = -totalWidth / 2f + cardActualWidth / 2f;
-            float xPos = startX + (index * (cardActualWidth + cardSpacing));
-            
-            // ONLY change X position, preserve Y position and everything else
-            Vector2 currentPos = rectTransform.anchoredPosition;
-            rectTransform.anchoredPosition = new Vector2(xPos, currentPos.y);
-            
-            Debug.Log($"Positioned card {card.CardData.cardName} manually at index {index}, position ({xPos}, {currentPos.y}) - preserved all other properties");
-        }
-        
-        // REMOVED AddRemoveButton method - no X buttons needed
-        
+        /// <summary>
+        /// Remove a card from the drop zone and trigger resource updates
+        /// </summary>
         public void RemoveCard(DraggableCard card)
         {
             if (queuedCards.Contains(card))
@@ -248,8 +204,10 @@ namespace MetaBalance.Cards
                 // Reorganize remaining cards
                 ReorganizeCards();
                 
+                // *** TRIGGER RESOURCE PREVIEW UPDATE ***
                 OnCardsChanged.Invoke(GetQueuedCardData());
-                Debug.Log($"Card {card.CardData.cardName} removed from queue");
+                
+                Debug.Log($"Card {card.CardData.cardName} removed from queue - resource preview updated");
             }
         }
         
@@ -259,6 +217,9 @@ namespace MetaBalance.Cards
             Debug.Log("Grid Layout Group handling card reorganization automatically");
         }
         
+        /// <summary>
+        /// Implement all queued cards (called during Implementation phase)
+        /// </summary>
         public void ImplementAllCards()
         {
             if (Core.PhaseManager.Instance?.GetCurrentPhase() != Core.GamePhase.Implementation)
@@ -271,8 +232,11 @@ namespace MetaBalance.Cards
             int totalRP = 0, totalCP = 0;
             foreach (var card in queuedCards)
             {
-                totalRP += card.CardData.researchPointCost;
-                totalCP += card.CardData.communityPointCost;
+                if (card != null && card.CardData != null)
+                {
+                    totalRP += card.CardData.researchPointCost;
+                    totalCP += card.CardData.communityPointCost;
+                }
             }
             
             // Check if player can afford all cards
@@ -288,34 +252,42 @@ namespace MetaBalance.Cards
             // Implement each card
             foreach (var card in queuedCards)
             {
-                card.CardData.PlayCard();
-                Debug.Log($"Implemented: {card.CardData.cardName}");
+                if (card != null && card.CardData != null)
+                {
+                    card.CardData.PlayCard();
+                    Debug.Log($"Implemented: {card.CardData.cardName}");
+                }
             }
             
-            // Clear the queue
-            ClearQueue();
-            
             Debug.Log($"Implemented {queuedCards.Count} cards for {totalRP} RP, {totalCP} CP");
+            
+            // Clear the queue after implementation
+            ClearQueue();
         }
         
+        /// <summary>
+        /// Clear all cards from the queue
+        /// </summary>
         public void ClearQueue()
         {
             foreach (var card in queuedCards)
             {
                 if (card != null)
                 {
-                    // Remove remove button
-                    var removeButton = card.transform.Find("RemoveButton");
-                    if (removeButton != null)
-                        Destroy(removeButton.gameObject);
-                    
                     Destroy(card.gameObject);
                 }
             }
             queuedCards.Clear();
+            
+            // Trigger resource update
             OnCardsChanged.Invoke(GetQueuedCardData());
+            
+            Debug.Log("Queue cleared - resource preview updated");
         }
         
+        /// <summary>
+        /// Handle phase changes
+        /// </summary>
         private void OnPhaseChanged(Core.GamePhase newPhase)
         {
             Debug.Log($"CardDropZone phase changed to: {newPhase}");
@@ -380,6 +352,7 @@ namespace MetaBalance.Cards
             }
         }
         
+        // Visual feedback methods
         private void SetNormalAppearance()
         {
             if (backgroundImage != null)
@@ -413,12 +386,13 @@ namespace MetaBalance.Cards
                 backgroundImage.color = new Color(0.8f, 0.4f, 0.1f, 0.7f); // Orange
         }
         
+        // Public getters for resource calculations
         public List<CardData> GetQueuedCardData()
         {
             var cardDataList = new List<CardData>();
             foreach (var card in queuedCards)
             {
-                if (card != null)
+                if (card != null && card.CardData != null)
                     cardDataList.Add(card.CardData);
             }
             return cardDataList;
@@ -432,21 +406,10 @@ namespace MetaBalance.Cards
         public int GetQueuedCardCount() => queuedCards.Count;
         public bool HasQueuedCards() => queuedCards.Count > 0;
         
-        [ContextMenu("Debug: Force Unlock All Cards in Drop Zone")]
-        public void DebugForceUnlockAllCards()
-        {
-            Debug.Log($"=== FORCE UNLOCKING {queuedCards.Count} CARDS IN DROP ZONE ===");
-            foreach (var card in queuedCards)
-            {
-                if (card != null)
-                {
-                    bool wasDraggingEnabled = card.IsDraggingEnabled();
-                    card.SetDraggingEnabled(true);
-                    Debug.Log($"🔓 Force unlocked {card.CardData.cardName} (was: {wasDraggingEnabled}, now: {card.IsDraggingEnabled()})");
-                }
-            }
-        }
-        
+        /// <summary>
+        /// Get total resource cost of all queued cards
+        /// Essential for ResourcePreviewUI
+        /// </summary>
         public void GetTotalQueuedCost(out int totalRP, out int totalCP)
         {
             totalRP = 0;
@@ -458,6 +421,22 @@ namespace MetaBalance.Cards
                 {
                     totalRP += card.CardData.researchPointCost;
                     totalCP += card.CardData.communityPointCost;
+                }
+            }
+        }
+        
+        // Debug methods
+        [ContextMenu("Debug: Force Unlock All Cards in Drop Zone")]
+        public void DebugForceUnlockAllCards()
+        {
+            Debug.Log($"=== FORCE UNLOCKING {queuedCards.Count} CARDS IN DROP ZONE ===");
+            foreach (var card in queuedCards)
+            {
+                if (card != null)
+                {
+                    bool wasDraggingEnabled = card.IsDraggingEnabled();
+                    card.SetDraggingEnabled(true);
+                    Debug.Log($"🔓 Force unlocked {card.CardData.cardName} (was: {wasDraggingEnabled}, now: {card.IsDraggingEnabled()})");
                 }
             }
         }
@@ -479,7 +458,7 @@ namespace MetaBalance.Cards
             for (int i = 0; i < queuedCards.Count; i++)
             {
                 var card = queuedCards[i];
-                if (card != null)
+                if (card != null && card.CardData != null)
                 {
                     Debug.Log($"  [{i}] {card.CardData.cardName}: {card.CardData.researchPointCost} RP, {card.CardData.communityPointCost} CP");
                 }
@@ -495,15 +474,22 @@ namespace MetaBalance.Cards
             for (int i = 0; i < queuedCards.Count; i++)
             {
                 var card = queuedCards[i];
-                if (card != null)
+                if (card != null && card.CardData != null)
                 {
                     Debug.Log($"  [{i}] {card.CardData.cardName} - Dragging: {card.IsDraggingEnabled()} - Parent: {card.transform.parent.name}");
                 }
                 else
                 {
-                    Debug.Log($"  [{i}] NULL CARD");
+                    Debug.Log($"  [{i}] NULL CARD OR NULL DATA");
                 }
             }
+        }
+        
+        [ContextMenu("Debug: Trigger Resource Update")]
+        public void DebugTriggerResourceUpdate()
+        {
+            OnCardsChanged.Invoke(GetQueuedCardData());
+            Debug.Log("Manually triggered resource preview update");
         }
         
         private void OnDestroy()

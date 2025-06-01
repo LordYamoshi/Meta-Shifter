@@ -6,7 +6,7 @@ using System.Collections.Generic;
 namespace MetaBalance.UI
 {
     /// <summary>
-    /// Updated UI manager that works with the prefab-based card system
+    /// Complete UI manager with resource preview integration
     /// </summary>
     public class UIManager : MonoBehaviour
     {
@@ -14,6 +14,13 @@ namespace MetaBalance.UI
         [SerializeField] private TextMeshProUGUI weekPhaseText;
         [SerializeField] private TextMeshProUGUI rpText;
         [SerializeField] private TextMeshProUGUI cpText;
+        [SerializeField] private TextMeshProUGUI rpGenerationText; // "+10/turn" text
+        [SerializeField] private TextMeshProUGUI cpGenerationText; // "+5/turn" text
+        [SerializeField] private TextMeshProUGUI rpGainText; // "+4" indicator text
+        [SerializeField] private Image rpGainBackground; // Green circle background for "+4"
+        [SerializeField] private TextMeshProUGUI cpGainText; // "+4" indicator text  
+        [SerializeField] private Image cpGainBackground; // Green circle background for "+4"
+        [SerializeField] private TextMeshProUGUI totalCostText; // "Total Costs: 5 RP, 3 CP"
         [SerializeField] private Slider satisfactionSlider;
         [SerializeField] private TextMeshProUGUI satisfactionText;
         [SerializeField] private Button nextPhaseButton;
@@ -43,7 +50,13 @@ namespace MetaBalance.UI
             // Initialize community satisfaction
             InitializeCommunitySystem();
             
+            // Initial display update
             UpdateDisplay();
+            
+            // Force additional updates to catch any initialization timing issues
+            Invoke(nameof(UpdateDisplay), 0.1f);
+            Invoke(nameof(UpdateDisplay), 0.5f);
+            Invoke(nameof(UpdateDisplay), 1f);
         }
         
         private void InitializeCommunitySystem()
@@ -171,10 +184,35 @@ namespace MetaBalance.UI
                 Cards.CardManager.Instance.OnCardPlayed.AddListener(OnCardPlayed);
             }
             
-            // Drop zone events
-            if (dropZone != null)
+            // Subscribe to ALL drop zones (not just one)
+            SubscribeToAllDropZones();
+            
+            // Set up recurring check for new drop zones
+            InvokeRepeating(nameof(SubscribeToAllDropZones), 1f, 2f);
+        }
+        
+        /// <summary>
+        /// Subscribe to all drop zones for cost updates
+        /// </summary>
+        private void SubscribeToAllDropZones()
+        {
+            var dropZones = FindObjectsOfType<Cards.CardDropZone>();
+            foreach (var dropZone in dropZones)
             {
-                dropZone.OnCardsChanged.AddListener(OnDropZoneChanged);
+                if (dropZone != null)
+                {
+                    // Remove listener first to avoid duplicates
+                    dropZone.OnCardsChanged.RemoveListener(OnDropZoneChanged);
+                    // Add listener
+                    dropZone.OnCardsChanged.AddListener(OnDropZoneChanged);
+                    Debug.Log($"📡 UIManager subscribed to drop zone: {dropZone.name}");
+                }
+            }
+            
+            if (dropZones.Length > 0)
+            {
+                // Force update when new drop zones are found
+                UpdateTopUI();
             }
         }
         
@@ -185,6 +223,18 @@ namespace MetaBalance.UI
             UpdateDropZoneDisplay();
         }
         
+        /// <summary>
+        /// Public method to force update resource display - called by ResourcePreviewUI
+        /// </summary>
+        public void UpdateResourceDisplay()
+        {
+            UpdateTopUI();
+            Debug.Log("🔄 UIManager resource display updated by ResourcePreviewUI");
+        }
+        
+        /// <summary>
+        /// Enhanced UpdateTopUI that gets dynamic generation rates AND total costs
+        /// </summary>
         private void UpdateTopUI()
         {
             // Update week/phase display
@@ -197,16 +247,194 @@ namespace MetaBalance.UI
                 }
             }
             
-            // Update resources display
-            if (rpText != null || cpText != null)
+            // Update resources display with DYNAMIC generation rates AND total costs
+            var resourceManager = Core.ResourceManager.Instance;
+            if (resourceManager != null)
             {
-                var resourceManager = Core.ResourceManager.Instance;
-                if (resourceManager != null)
+                // Get current resources
+                int currentRP = resourceManager.ResearchPoints;
+                int currentCP = resourceManager.CommunityPoints;
+                
+                // Get DYNAMIC generation rates (not hardcoded!)
+                int rpPerWeek = resourceManager.RPPerWeek;
+                int cpPerWeek = resourceManager.CPPerWeek;
+                
+                // Calculate total cost from all drop zones
+                int totalRPCost = 0;
+                int totalCPCost = 0;
+                GetTotalQueuedCost(out totalRPCost, out totalCPCost);
+                
+                // Update main resource text
+                if (rpText != null)
+                    rpText.text = $"RP: {currentRP}";
+                if (cpText != null)
+                    cpText.text = $"CP: {currentCP}";
+                
+                // Update generation rate text (stays same color)
+                if (rpGenerationText != null)
+                    rpGenerationText.text = $"+{rpPerWeek}/turn";
+                if (cpGenerationText != null)
+                    cpGenerationText.text = $"+{cpPerWeek}/turn";
+                
+                // Update the gain indicators (+4, +4) with color changes
+                UpdateGainIndicators(currentRP, currentCP, totalRPCost, totalCPCost);
+                
+                // Update total cost display (single text with no color changes)
+                if (totalCostText != null)
                 {
-                    if (rpText != null)
-                        rpText.text = $"RP: {resourceManager.ResearchPoints}";
-                    if (cpText != null)
-                        cpText.text = $"CP: {resourceManager.CommunityPoints}";
+                    if (totalRPCost > 0 || totalCPCost > 0)
+                    {
+                        string costDisplay = "Total Costs: ";
+                        
+                        if (totalRPCost > 0)
+                            costDisplay += $"{totalRPCost} RP";
+                        
+                        if (totalRPCost > 0 && totalCPCost > 0)
+                            costDisplay += ", ";
+                        
+                        if (totalCPCost > 0)
+                            costDisplay += $"{totalCPCost} CP";
+                        
+                        totalCostText.text = costDisplay;
+                        totalCostText.gameObject.SetActive(true);
+                        
+                        // Keep total cost text color constant (white)
+                        totalCostText.color = Color.white;
+                    }
+                    else
+                    {
+                        totalCostText.gameObject.SetActive(false);
+                    }
+                }
+                
+                Debug.Log($"📊 Main UI updated: RP {currentRP} (+{rpPerWeek}/turn), CP {currentCP} (+{cpPerWeek}/turn), Total cost: {totalRPCost} RP, {totalCPCost} CP");
+            }
+        }
+        
+        /// <summary>
+        /// Update the gain indicators to show cost reduction (-5) with proper colors
+        /// </summary>
+        private void UpdateGainIndicators(int currentRP, int currentCP, int totalRPCost, int totalCPCost)
+        {
+            // Calculate what resources will be after spending
+            int afterRP = currentRP - totalRPCost;
+            int afterCP = currentCP - totalCPCost;
+            
+            Debug.Log($"🎨 UpdateGainIndicators called: RP {currentRP}-{totalRPCost}={afterRP}, CP {currentCP}-{totalCPCost}={afterCP}");
+            
+            // Update RP cost indicator (show reduction, not gain)
+            if (rpGainText != null)
+            {
+                if (totalRPCost > 0)
+                {
+                    rpGainText.text = $"-{totalRPCost}"; // Show cost as negative
+                    rpGainText.gameObject.SetActive(true);
+                    
+                    // Color based on resource situation
+                    Color textColor;
+                    Color bgColor;
+                    
+                    if (afterRP < 0)
+                    {
+                        // Can't afford - red
+                        textColor = new Color(1f, 0.9f, 0.9f); // Light red text
+                        bgColor = new Color(0.8f, 0.2f, 0.2f); // Red background
+                        Debug.Log($"🔴 RP indicator: RED (after: {afterRP})");
+                    }
+                    else if (afterRP <= 5)
+                    {
+                        // Low resources - yellow
+                        textColor = new Color(1f, 1f, 0.9f); // Light yellow text
+                        bgColor = new Color(0.8f, 0.8f, 0.2f); // Yellow background
+                        Debug.Log($"🟡 RP indicator: YELLOW (after: {afterRP})");
+                    }
+                    else
+                    {
+                        // Good resources - green
+                        textColor = new Color(0.9f, 1f, 0.9f); // Light green text
+                        bgColor = new Color(0.2f, 0.8f, 0.2f); // Green background
+                        Debug.Log($"🟢 RP indicator: GREEN (after: {afterRP})");
+                    }
+                    
+                    rpGainText.color = textColor;
+                    if (rpGainBackground != null)
+                        rpGainBackground.color = bgColor;
+                }
+                else
+                {
+                    // No cost - hide the indicator
+                    rpGainText.gameObject.SetActive(false);
+                    if (rpGainBackground != null)
+                        rpGainBackground.gameObject.SetActive(false);
+                    Debug.Log("🚫 RP indicator: HIDDEN (no cost)");
+                }
+            }
+            
+            // Update CP cost indicator (show reduction, not gain)
+            if (cpGainText != null)
+            {
+                if (totalCPCost > 0)
+                {
+                    cpGainText.text = $"-{totalCPCost}"; // Show cost as negative
+                    cpGainText.gameObject.SetActive(true);
+                    
+                    // Color based on resource situation
+                    Color textColor;
+                    Color bgColor;
+                    
+                    if (afterCP < 0)
+                    {
+                        // Can't afford - red
+                        textColor = new Color(1f, 0.9f, 0.9f); // Light red text
+                        bgColor = new Color(0.8f, 0.2f, 0.2f); // Red background
+                        Debug.Log($"🔴 CP indicator: RED (after: {afterCP})");
+                    }
+                    else if (afterCP <= 2)
+                    {
+                        // Low resources - yellow
+                        textColor = new Color(1f, 1f, 0.9f); // Light yellow text
+                        bgColor = new Color(0.8f, 0.8f, 0.2f); // Yellow background
+                        Debug.Log($"🟡 CP indicator: YELLOW (after: {afterCP})");
+                    }
+                    else
+                    {
+                        // Good resources - green
+                        textColor = new Color(0.9f, 1f, 0.9f); // Light green text
+                        bgColor = new Color(0.2f, 0.8f, 0.2f); // Green background
+                        Debug.Log($"🟢 CP indicator: GREEN (after: {afterCP})");
+                    }
+                    
+                    cpGainText.color = textColor;
+                    if (cpGainBackground != null)
+                        cpGainBackground.color = bgColor;
+                }
+                else
+                {
+                    // No cost - hide the indicator
+                    cpGainText.gameObject.SetActive(false);
+                    if (cpGainBackground != null)
+                        cpGainBackground.gameObject.SetActive(false);
+                    Debug.Log("🚫 CP indicator: HIDDEN (no cost)");
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Get total cost of all queued cards from all drop zones
+        /// </summary>
+        private void GetTotalQueuedCost(out int totalRP, out int totalCP)
+        {
+            totalRP = 0;
+            totalCP = 0;
+            
+            var dropZones = FindObjectsOfType<Cards.CardDropZone>();
+            foreach (var dropZone in dropZones)
+            {
+                if (dropZone != null)
+                {
+                    dropZone.GetTotalQueuedCost(out int rpCost, out int cpCost);
+                    totalRP += rpCost;
+                    totalCP += cpCost;
                 }
             }
         }
@@ -328,7 +556,8 @@ namespace MetaBalance.UI
         
         private void OnDropZoneChanged(List<Cards.CardData> queuedCards)
         {
-            UpdateDebugText($"Queued cards: {queuedCards.Count}");
+            Debug.Log($"🔄 UIManager: Drop zone changed - {queuedCards.Count} cards queued, updating total cost");
+            UpdateTopUI(); // This will recalculate and update the total cost display
         }
         
         private void UpdateDebugText(string message)
@@ -338,6 +567,94 @@ namespace MetaBalance.UI
                 debugText.text = $"{System.DateTime.Now:HH:mm:ss} - {message}";
             }
             Debug.Log(message);
+        }
+        
+        [ContextMenu("Debug: Force Update All UI")]
+        public void DebugForceUpdateUI()
+        {
+            UpdateDisplay();
+            Debug.Log("🔄 Forced complete UI update");
+        }
+        
+        [ContextMenu("Debug: Check Resource Components")]
+        public void DebugCheckResourceComponents()
+        {
+            Debug.Log("=== UI RESOURCE COMPONENTS CHECK ===");
+            Debug.Log($"rpText: {(rpText != null ? "✅" : "❌")}");
+            Debug.Log($"cpText: {(cpText != null ? "✅" : "❌")}");
+            Debug.Log($"rpGenerationText: {(rpGenerationText != null ? "✅" : "❌")}");
+            Debug.Log($"cpGenerationText: {(cpGenerationText != null ? "✅" : "❌")}");
+            Debug.Log($"rpGainText: {(rpGainText != null ? "✅" : "❌")}");
+            Debug.Log($"rpGainBackground: {(rpGainBackground != null ? "✅" : "❌")}");
+            Debug.Log($"cpGainText: {(cpGainText != null ? "✅" : "❌")}");
+            Debug.Log($"cpGainBackground: {(cpGainBackground != null ? "✅" : "❌")}");
+            Debug.Log($"totalCostText: {(totalCostText != null ? "✅" : "❌")}");
+            
+            if (Core.ResourceManager.Instance != null)
+            {
+                var rm = Core.ResourceManager.Instance;
+                Debug.Log($"ResourceManager RP: {rm.ResearchPoints} (+{rm.RPPerWeek}/turn)");
+                Debug.Log($"ResourceManager CP: {rm.CommunityPoints} (+{rm.CPPerWeek}/turn)");
+                
+                GetTotalQueuedCost(out int totalRP, out int totalCP);
+                Debug.Log($"Total queued cost: {totalRP} RP, {totalCP} CP");
+            }
+            else
+            {
+                Debug.Log("❌ ResourceManager not found");
+            }
+        }
+        
+        [ContextMenu("Debug: Test Gain Colors")]
+        public void DebugTestGainColors()
+        {
+            Debug.Log("🎨 Testing gain indicator colors...");
+            
+            // Test different scenarios
+            UpdateGainIndicators(5, 2, 0, 0); // Low resources
+            Debug.Log("Applied low resource colors (should be yellow)");
+        }
+        
+        [ContextMenu("Debug: Check Color Update Frequency")]
+        public void DebugCheckColorUpdateFrequency()
+        {
+            Debug.Log("🔍 Checking for duplicate color updates...");
+            Debug.Log("Watch the console for multiple '🎨 UpdateGainIndicators called' messages");
+            Debug.Log("If you see the same message multiple times quickly, there's a duplicate call");
+            
+            // Force an update and watch for duplicates
+            UpdateDisplay();
+        }
+        
+        [ContextMenu("Debug: Force Update Total Cost")]
+        public void DebugForceUpdateTotalCost()
+        {
+            GetTotalQueuedCost(out int totalRP, out int totalCP);
+            Debug.Log($"🎯 Manual total cost check: {totalRP} RP, {totalCP} CP");
+            UpdateTopUI();
+        }
+        
+        [ContextMenu("Debug: Check Drop Zone Subscriptions")]
+        public void DebugCheckDropZoneSubscriptions()
+        {
+            Debug.Log("=== DROP ZONE SUBSCRIPTION CHECK ===");
+            var dropZones = FindObjectsOfType<Cards.CardDropZone>();
+            Debug.Log($"Found {dropZones.Length} drop zones:");
+            
+            for (int i = 0; i < dropZones.Length; i++)
+            {
+                var dz = dropZones[i];
+                int listenerCount = dz.OnCardsChanged.GetPersistentEventCount();
+                dz.GetTotalQueuedCost(out int rpCost, out int cpCost);
+                Debug.Log($"  Drop zone {i} ({dz.name}): {listenerCount} listeners, {dz.GetQueuedCardCount()} cards, costs {rpCost} RP + {cpCost} CP");
+            }
+        }
+        
+        [ContextMenu("Debug: Force Resubscribe to Drop Zones")]
+        public void DebugForceResubscribeDropZones()
+        {
+            Debug.Log("🔄 Force resubscribing to all drop zones...");
+            SubscribeToAllDropZones();
         }
     }
     
