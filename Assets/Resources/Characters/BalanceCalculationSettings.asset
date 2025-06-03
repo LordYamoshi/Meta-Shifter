@@ -1,0 +1,39 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a78800f39106aa44595a8ddd9cf660da, type: 3}
+  m_Name: BalanceCalculationSettings
+  m_EditorClassIdentifier: 
+  winRateTransitionSpeed: 0.3
+  maxRandomVariance: 3
+  healthWeight: 0.25
+  damageWeight: 0.35
+  speedWeight: 0.2
+  utilityWeight: 0.2
+  maxMatchupModifier: 8
+  matchupInfluence: 0.4
+  popularityPenalty: 4
+  unpopularityBonus: 3
+  highPopularityThreshold: 70
+  lowPopularityThreshold: 30
+  idealWinRateRange: 5
+  idealPopularityRange: 25
+  calculationIterations: 3
+  calculationMomentum: 0.2
+  archetypeModifiers:
+    warriorModifier: 0
+    mageModifier: 0
+    supportModifier: -2
+    tankModifier: 1
+    warriorPopularityMod: 5
+    magePopularityMod: 0
+    supportPopularityMod: -10
+    tankPopularityMod: -5
