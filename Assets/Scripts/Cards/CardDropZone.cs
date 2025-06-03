@@ -1,18 +1,19 @@
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine.Events;
 
 namespace MetaBalance.Cards
 {
     /// <summary>
-    /// Complete CardDropZone with resource preview integration
+    /// CardDropZone with individual card effects only - simplified and streamlined
     /// </summary>
     public class CardDropZone : MonoBehaviour, IDropHandler, IPointerEnterHandler, IPointerExitHandler
     {
         [Header("Drop Zone Settings")]
-        [SerializeField] private RectTransform cardContainer; // This should be THIS transform, not hand container
+        [SerializeField] private RectTransform cardContainer;
         [SerializeField] private int maxCards = 5;
         
         [Header("Visual Feedback")]
@@ -20,36 +21,45 @@ namespace MetaBalance.Cards
         [SerializeField] private Color normalColor = new Color(0.2f, 0.2f, 0.2f, 0.5f);
         [SerializeField] private Color highlightColor = new Color(0.2f, 0.5f, 0.8f, 0.7f);
         [SerializeField] private Color acceptColor = new Color(0.2f, 0.8f, 0.2f, 0.7f);
-        [SerializeField] private Color rejectColor = new Color(0.8f, 0.2f, 0.2f, 0.7f); // Red for rejection
+        [SerializeField] private Color rejectColor = new Color(0.8f, 0.2f, 0.2f, 0.7f);
+        [SerializeField] private Color implementationColor = new Color(0.8f, 0.4f, 0.1f, 0.7f);
         
         [Header("Layout")]
         [SerializeField] private float cardSpacing = 10f;
         [SerializeField] private float cardWidth = 120f;
         [SerializeField] private float cardHeight = 160f;
         
+        [Header("Implementation Effects")]
+        [SerializeField] private float delayBetweenCardEffects = 0.5f;
+        [SerializeField] private float implementationHighlightDuration = 1.5f;
+        [SerializeField] private Color implementationHighlightColor = Color.yellow;
+        [SerializeField] private float fadeOutDuration = 1.0f;
+        
         [Header("Events")]
         public UnityEvent<List<CardData>> OnCardsChanged;
+        public UnityEvent<CardData> OnCardImplemented;
+        public UnityEvent OnImplementationStarted;
+        public UnityEvent OnImplementationCompleted;
         
         private List<DraggableCard> queuedCards = new List<DraggableCard>();
+        private bool isImplementing = false;
         
         private void Start()
+        {
+            InitializeDropZone();
+            SubscribeToEvents();
+        }
+        
+        private void InitializeDropZone()
         {
             if (backgroundImage == null)
                 backgroundImage = GetComponent<Image>();
             
-            // If no card container is specified, use this transform
             if (cardContainer == null)
                 cardContainer = GetComponent<RectTransform>();
             
             SetNormalAppearance();
             
-            // Subscribe to phase changes
-            if (Core.PhaseManager.Instance != null)
-            {
-                Core.PhaseManager.Instance.OnPhaseChanged.AddListener(OnPhaseChanged);
-            }
-            
-            // Ensure this object can receive drops
             var graphicRaycaster = GetComponentInParent<GraphicRaycaster>();
             if (graphicRaycaster == null)
             {
@@ -59,45 +69,48 @@ namespace MetaBalance.Cards
             Debug.Log($"CardDropZone initialized on {gameObject.name}, using container: {cardContainer?.name ?? "null"}");
         }
         
-        /// <summary>
-        /// Enhanced CanAcceptCard that considers total queue cost including current card
-        /// </summary>
+        private void SubscribeToEvents()
+        {
+            if (Core.PhaseManager.Instance != null)
+            {
+                Core.PhaseManager.Instance.OnPhaseChanged.AddListener(OnPhaseChanged);
+            }
+        }
+        
         public bool CanAcceptCard(CardData cardData)
         {
-            // Check if we have space
             bool hasSpace = queuedCards.Count < maxCards;
-            
-            // Check if we're in planning phase
             bool isPlanning = Core.PhaseManager.Instance?.GetCurrentPhase() == Core.GamePhase.Planning;
+            bool notImplementing = !isImplementing;
+            bool canAfford = Core.ResourceManager.Instance?.CanSpend(cardData.researchPointCost, cardData.communityPointCost) ?? false;
+            bool canAffordTotal = CanAffordAllQueuedCards(cardData);
             
-            // Calculate total cost of all queued cards + this new card
-            int totalRP = cardData.researchPointCost;
-            int totalCP = cardData.communityPointCost;
+            Debug.Log($"CanAcceptCard {cardData.cardName}: hasSpace={hasSpace}, isPlanning={isPlanning}, notImplementing={notImplementing}, canAfford={canAfford}, canAffordTotal={canAffordTotal}");
             
-            foreach (var queuedCard in queuedCards)
+            return hasSpace && isPlanning && notImplementing && canAfford && canAffordTotal;
+        }
+        
+        private bool CanAffordAllQueuedCards(CardData additionalCard = null)
+        {
+            int totalRP = additionalCard?.researchPointCost ?? 0;
+            int totalCP = additionalCard?.communityPointCost ?? 0;
+            
+            foreach (var card in queuedCards)
             {
-                if (queuedCard != null && queuedCard.CardData != null)
+                if (card?.CardData != null)
                 {
-                    totalRP += queuedCard.CardData.researchPointCost;
-                    totalCP += queuedCard.CardData.communityPointCost;
+                    totalRP += card.CardData.researchPointCost;
+                    totalCP += card.CardData.communityPointCost;
                 }
             }
             
-            // Check if player can afford ALL queued cards including this one
-            bool canAffordTotal = Core.ResourceManager.Instance?.CanSpend(totalRP, totalCP) ?? false;
-            
-            Debug.Log($"CanAcceptCard {cardData.cardName}: hasSpace={hasSpace}, isPlanning={isPlanning}, canAffordTotal={canAffordTotal}");
-            Debug.Log($"  Current resources: RP={Core.ResourceManager.Instance?.ResearchPoints}, CP={Core.ResourceManager.Instance?.CommunityPoints}");
-            Debug.Log($"  Total cost if added: RP={totalRP}, CP={totalCP}");
-            
-            return hasSpace && isPlanning && canAffordTotal;
+            return Core.ResourceManager.Instance?.CanSpend(totalRP, totalCP) ?? false;
         }
         
         public void OnDrop(PointerEventData eventData)
         {
             Debug.Log("OnDrop called!");
             
-            // Get the dragged card
             var draggedObject = eventData.pointerDrag;
             if (draggedObject == null)
             {
@@ -149,12 +162,10 @@ namespace MetaBalance.Cards
         
         public void OnPointerExit(PointerEventData eventData)
         {
-            SetNormalAppearance();
+            if (!isImplementing)
+                SetNormalAppearance();
         }
         
-        /// <summary>
-        /// Accept a card into the drop zone and trigger resource updates
-        /// </summary>
         public void AcceptCard(DraggableCard card)
         {
             if (!CanAcceptCard(card.CardData)) 
@@ -165,33 +176,44 @@ namespace MetaBalance.Cards
             
             Debug.Log($"CardDropZone: Accepting card {card.CardData.cardName}");
             
-            // Add to queued cards FIRST
             queuedCards.Add(card);
             
-            // Set parent to the cardContainer
+            // ABSOLUTE POSITION PRESERVATION
+            var rect = card.GetComponent<RectTransform>();
+            Vector3 originalWorldPosition = rect.position;
+            Vector2 originalSizeDelta = rect.sizeDelta;
+            Vector3 originalScale = rect.localScale;
+            
             Transform targetParent = cardContainer != null ? cardContainer.transform : this.transform;
             card.transform.SetParent(targetParent, true);
             
-            // Enable dragging if in planning phase
+            // FORCE restore exact same visual properties
+            rect.position = originalWorldPosition;
+            rect.sizeDelta = originalSizeDelta;
+            rect.localScale = originalScale;
+            
             bool isPlanning = Core.PhaseManager.Instance?.GetCurrentPhase() == Core.GamePhase.Planning;
             card.SetDraggingEnabled(isPlanning);
             
-            // *** TRIGGER RESOURCE PREVIEW UPDATE ***
+            // Remove from hand
+            if (CardManager.Instance != null)
+            {
+                CardManager.Instance.RemoveCardFromHand(card);
+            }
+            
             OnCardsChanged.Invoke(GetQueuedCardData());
             
-            Debug.Log($"✅ Card {card.CardData.cardName} added to drop zone - resource preview updated");
+            Debug.Log($"✅ Card {card.CardData.cardName} added to drop zone with EXACT same appearance");
         }
         
-        /// <summary>
-        /// Remove a card from the drop zone and trigger resource updates
-        /// </summary>
         public void RemoveCard(DraggableCard card)
         {
             if (queuedCards.Contains(card))
             {
                 queuedCards.Remove(card);
                 
-                // Return to hand - let CardManager handle re-adding to hand
+                Debug.Log($"🗑️ Removed {card.CardData.cardName} from implementation queue");
+                
                 if (CardManager.Instance != null)
                 {
                     CardManager.Instance.ReturnCardToHand(card);
@@ -201,24 +223,23 @@ namespace MetaBalance.Cards
                     card.ReturnToHand();
                 }
                 
-                // Reorganize remaining cards
                 ReorganizeCards();
-                
-                // *** TRIGGER RESOURCE PREVIEW UPDATE ***
                 OnCardsChanged.Invoke(GetQueuedCardData());
-                
-                Debug.Log($"Card {card.CardData.cardName} removed from queue - resource preview updated");
+                Debug.Log($"✅ {card.CardData.cardName} successfully unqueued and returned to hand");
+            }
+            else
+            {
+                Debug.LogWarning($"⚠️ Tried to remove {card.CardData?.cardName ?? "unknown card"} but it wasn't in the queue");
             }
         }
         
         private void ReorganizeCards()
         {
-            // Grid Layout Group handles organization automatically - no manual work needed
             Debug.Log("Grid Layout Group handling card reorganization automatically");
         }
         
         /// <summary>
-        /// Implement all queued cards (called during Implementation phase)
+        /// Main implementation method - implements all cards with individual effects
         /// </summary>
         public void ImplementAllCards()
         {
@@ -232,7 +253,7 @@ namespace MetaBalance.Cards
             int totalRP = 0, totalCP = 0;
             foreach (var card in queuedCards)
             {
-                if (card != null && card.CardData != null)
+                if (card?.CardData != null)
                 {
                     totalRP += card.CardData.researchPointCost;
                     totalCP += card.CardData.communityPointCost;
@@ -249,24 +270,206 @@ namespace MetaBalance.Cards
             // Spend resources
             resourceManager.SpendResources(totalRP, totalCP);
             
-            // Implement each card
-            foreach (var card in queuedCards)
-            {
-                if (card != null && card.CardData != null)
-                {
-                    card.CardData.PlayCard();
-                    Debug.Log($"Implemented: {card.CardData.cardName}");
-                }
-            }
-            
-            Debug.Log($"Implemented {queuedCards.Count} cards for {totalRP} RP, {totalCP} CP");
-            
-            // Clear the queue after implementation
-            ClearQueue();
+            // Start implementation with individual card effects
+            StartCoroutine(ImplementCardsWithIndividualEffects());
         }
         
         /// <summary>
-        /// Clear all cards from the queue
+        /// Implement cards with individual effects - one card completely finishes before next starts
+        /// </summary>
+        private IEnumerator ImplementCardsWithIndividualEffects()
+        {
+            isImplementing = true;
+            OnImplementationStarted.Invoke();
+            SetImplementationAppearance();
+            
+            Debug.Log($"🎯 Starting sequential implementation of {queuedCards.Count} cards");
+            
+            for (int i = 0; i < queuedCards.Count; i++)
+            {
+                var card = queuedCards[i];
+                if (card?.CardData != null)
+                {
+                    Debug.Log($"🎯 Implementing card {i + 1}/{queuedCards.Count}: {card.CardData.cardName}");
+                    
+                    // Get or add ImplementationEffect to the card
+                    var cardEffect = card.GetComponent<Effects.ImplementationEffect>();
+                    if (cardEffect == null)
+                    {
+                        Debug.Log($"⚠️ No ImplementationEffect on {card.CardData.cardName}, adding one dynamically");
+                        cardEffect = card.gameObject.AddComponent<Effects.ImplementationEffect>();
+                        
+                        // Set default values for dynamically added effect
+                        cardEffect.SetDuration(implementationHighlightDuration);
+                    }
+                    
+                    // STEP 1: Start highlight and implementation effect
+                    Debug.Log($"🌟 Step 1: Starting highlight for {card.CardData.cardName}");
+                    yield return StartCoroutine(HighlightCardDuringImplementation(card, cardEffect));
+                    
+                    Debug.Log($"✅ Step 1 Complete: {card.CardData.cardName} implementation finished");
+                    
+                    // STEP 2: Fade out the card completely
+                    Debug.Log($"💨 Step 2: Starting fade out for {card.CardData.cardName}");
+                    yield return StartCoroutine(FadeOutCard(card));
+                    
+                    Debug.Log($"✅ Step 2 Complete: {card.CardData.cardName} completely hidden");
+                    
+                    // STEP 3: Small delay before next card (optional)
+                    if (i < queuedCards.Count - 1) // Only delay if there's a next card
+                    {
+                        Debug.Log($"⏱️ Step 3: Waiting {delayBetweenCardEffects}s before next card");
+                        yield return new WaitForSeconds(delayBetweenCardEffects);
+                    }
+                    
+                    Debug.Log($"🔄 Ready for next card ({i + 2}/{queuedCards.Count})");
+                }
+            }
+            
+            Debug.Log($"🏁 All cards have been individually processed and hidden");
+            
+            // Clear the queue after all implementations and fade-outs are complete
+            ClearQueue();
+            
+            isImplementing = false;
+            OnImplementationCompleted.Invoke();
+            SetNormalAppearance();
+            
+            Debug.Log($"✅ Sequential implementation completed successfully");
+        }
+        
+        /// <summary>
+        /// Highlight card with background color during implementation
+        /// </summary>
+        private IEnumerator HighlightCardDuringImplementation(DraggableCard card, Effects.ImplementationEffect cardEffect)
+        {
+            if (card == null) yield break;
+            
+            Debug.Log($"✨ Starting highlight for {card.CardData.cardName}");
+            
+            // Get card background image
+            var cardBackground = card.GetComponent<Image>();
+            if (cardBackground == null)
+            {
+                Debug.LogWarning($"No Image component found on {card.CardData.cardName} for highlighting");
+                yield break;
+            }
+            
+            // Store original color
+            Color originalColor = cardBackground.color;
+            
+            // Play SFX if available
+            if (cardEffect != null)
+            {
+                cardEffect.PlayImplementationEffect(card.CardData);
+            }
+            
+            float elapsed = 0f;
+            
+            // Phase 1: Fade to highlight color (0.3s)
+            float fadeInDuration = 0.3f;
+            while (elapsed < fadeInDuration)
+            {
+                elapsed += Time.deltaTime;
+                float t = elapsed / fadeInDuration;
+                
+                // Smooth transition to highlight color
+                cardBackground.color = Color.Lerp(originalColor, implementationHighlightColor, t);
+                yield return null;
+            }
+            
+            // Ensure we're at full highlight color
+            cardBackground.color = implementationHighlightColor;
+            
+            // Apply the card logic during highlight
+            card.CardData.PlayCard();
+            OnCardImplemented.Invoke(card.CardData);
+            
+            // Phase 2: Hold highlight color (main duration - fade times)
+            float holdDuration = implementationHighlightDuration - (fadeInDuration * 2);
+            if (holdDuration > 0)
+            {
+                yield return new WaitForSeconds(holdDuration);
+            }
+            
+            // Phase 3: Fade back to original color (0.3s)
+            elapsed = 0f;
+            while (elapsed < fadeInDuration)
+            {
+                elapsed += Time.deltaTime;
+                float t = elapsed / fadeInDuration;
+                
+                // Smooth transition back to original color
+                cardBackground.color = Color.Lerp(implementationHighlightColor, originalColor, t);
+                yield return null;
+            }
+            
+            // Ensure we're back to original color
+            cardBackground.color = originalColor;
+            
+            Debug.Log($"✨ Highlight completed for {card.CardData.cardName}");
+        }
+        
+        /// <summary>
+        /// Fade out card smoothly after implementation - BLOCKS until completely hidden
+        /// </summary>
+        private IEnumerator FadeOutCard(DraggableCard card)
+        {
+            if (card == null) yield break;
+            
+            Debug.Log($"💨 Starting fade out for {card.CardData.cardName}");
+            
+            // Get or add CanvasGroup for fading
+            var canvasGroup = card.GetComponent<CanvasGroup>();
+            if (canvasGroup == null)
+            {
+                canvasGroup = card.gameObject.AddComponent<CanvasGroup>();
+            }
+            
+            // Store original values
+            float startAlpha = canvasGroup.alpha;
+            Vector3 startScale = card.transform.localScale;
+            Vector3 startPosition = card.transform.localPosition;
+            
+            float elapsed = 0f;
+            
+            while (elapsed < fadeOutDuration && card != null)
+            {
+                elapsed += Time.deltaTime;
+                float t = elapsed / fadeOutDuration;
+                
+                // Smooth fade out curve (ease in)
+                float fadeT = 1f - Mathf.Pow(1f - t, 2f);
+                
+                // Fade alpha
+                canvasGroup.alpha = Mathf.Lerp(startAlpha, 0f, fadeT);
+                
+                // Slight scale down
+                float scaleMultiplier = Mathf.Lerp(1f, 0.8f, fadeT);
+                card.transform.localScale = startScale * scaleMultiplier;
+                
+                // Optional: Slight upward drift
+                Vector3 driftOffset = Vector3.up * (fadeT * 10f);
+                card.transform.localPosition = startPosition + driftOffset;
+                
+                yield return null;
+            }
+            
+            // Ensure card is completely faded
+            if (card != null && canvasGroup != null)
+            {
+                canvasGroup.alpha = 0f;
+                card.transform.localScale = startScale * 0.8f;
+                
+                Debug.Log($"💨 {card.CardData.cardName} fade out completed - card is now completely hidden");
+                
+                // Disable the card GameObject - it's now completely hidden
+                card.gameObject.SetActive(false);
+            }
+        }
+        
+        /// <summary>
+        /// Clear queue - handles faded out cards properly
         /// </summary>
         public void ClearQueue()
         {
@@ -278,16 +481,9 @@ namespace MetaBalance.Cards
                 }
             }
             queuedCards.Clear();
-            
-            // Trigger resource update
             OnCardsChanged.Invoke(GetQueuedCardData());
-            
-            Debug.Log("Queue cleared - resource preview updated");
         }
         
-        /// <summary>
-        /// Handle phase changes
-        /// </summary>
         private void OnPhaseChanged(Core.GamePhase newPhase)
         {
             Debug.Log($"CardDropZone phase changed to: {newPhase}");
@@ -296,30 +492,14 @@ namespace MetaBalance.Cards
             {
                 case Core.GamePhase.Planning:
                     SetNormalAppearance();
-                    // UNLOCK all cards in this drop zone for dragging
-                    foreach (var card in queuedCards)
-                    {
-                        if (card != null)
-                        {
-                            card.SetDraggingEnabled(true);
-                            Debug.Log($"🔓 Planning phase: Unlocked {card.CardData.cardName} in drop zone for dragging");
-                        }
-                    }
-                    Debug.Log($"✅ Drop zone unlocked {queuedCards.Count} cards for planning phase");
+                    isImplementing = false;
+                    EnableCardDragging();
                     break;
                     
                 case Core.GamePhase.Implementation:
                     SetImplementationAppearance();
-                    // LOCK all cards during implementation
-                    foreach (var card in queuedCards)
-                    {
-                        if (card != null)
-                        {
-                            card.SetDraggingEnabled(false);
-                            Debug.Log($"🔒 Implementation phase: Locked {card.CardData.cardName}");
-                        }
-                    }
-                    // Auto-implement cards
+                    DisableCardDragging();
+                    // Auto-implement cards if there are any
                     if (queuedCards.Count > 0)
                     {
                         ImplementAllCards();
@@ -327,32 +507,39 @@ namespace MetaBalance.Cards
                     break;
                     
                 case Core.GamePhase.Feedback:
-                    SetNormalAppearance();
-                    // LOCK all cards during feedback
-                    foreach (var card in queuedCards)
-                    {
-                        if (card != null)
-                        {
-                            card.SetDraggingEnabled(false);
-                        }
-                    }
-                    break;
-                    
                 case Core.GamePhase.Event:
-                    SetNormalAppearance();
-                    // LOCK all cards during event phase
-                    foreach (var card in queuedCards)
-                    {
-                        if (card != null)
-                        {
-                            card.SetDraggingEnabled(false);
-                        }
-                    }
+                    if (!isImplementing)
+                        SetNormalAppearance();
+                    DisableCardDragging();
                     break;
             }
         }
         
-        // Visual feedback methods
+        private void EnableCardDragging()
+        {
+            foreach (var card in queuedCards)
+            {
+                if (card != null)
+                {
+                    card.SetDraggingEnabled(true);
+                    Debug.Log($"🔓 Planning phase: Unlocked {card.CardData.cardName} in drop zone for dragging");
+                }
+            }
+            Debug.Log($"✅ Drop zone unlocked {queuedCards.Count} cards for planning phase");
+        }
+        
+        private void DisableCardDragging()
+        {
+            foreach (var card in queuedCards)
+            {
+                if (card != null)
+                {
+                    card.SetDraggingEnabled(false);
+                }
+            }
+        }
+        
+        // Visual appearance methods
         private void SetNormalAppearance()
         {
             if (backgroundImage != null)
@@ -376,23 +563,22 @@ namespace MetaBalance.Cards
             if (backgroundImage != null)
                 backgroundImage.color = acceptColor;
             
-            // Return to normal after a short delay
             Invoke(nameof(SetNormalAppearance), 0.5f);
         }
         
         private void SetImplementationAppearance()
         {
             if (backgroundImage != null)
-                backgroundImage.color = new Color(0.8f, 0.4f, 0.1f, 0.7f); // Orange
+                backgroundImage.color = implementationColor;
         }
         
-        // Public getters for resource calculations
+        // Public getters
         public List<CardData> GetQueuedCardData()
         {
             var cardDataList = new List<CardData>();
             foreach (var card in queuedCards)
             {
-                if (card != null && card.CardData != null)
+                if (card != null)
                     cardDataList.Add(card.CardData);
             }
             return cardDataList;
@@ -406,10 +592,6 @@ namespace MetaBalance.Cards
         public int GetQueuedCardCount() => queuedCards.Count;
         public bool HasQueuedCards() => queuedCards.Count > 0;
         
-        /// <summary>
-        /// Get total resource cost of all queued cards
-        /// Essential for ResourcePreviewUI
-        /// </summary>
         public void GetTotalQueuedCost(out int totalRP, out int totalCP)
         {
             totalRP = 0;
@@ -423,6 +605,113 @@ namespace MetaBalance.Cards
                     totalCP += card.CardData.communityPointCost;
                 }
             }
+        }
+        
+        /// <summary>
+        /// Debug method to manually remove a specific card from queue
+        /// </summary>
+        [ContextMenu("Debug: Remove First Card from Queue")]
+        public void DebugRemoveFirstCard()
+        {
+            if (queuedCards.Count > 0)
+            {
+                var firstCard = queuedCards[0];
+                Debug.Log($"🧪 Manually removing first card: {firstCard.CardData.cardName}");
+                RemoveCard(firstCard);
+            }
+            else
+            {
+                Debug.Log("🧪 No cards in queue to remove");
+            }
+        }
+        
+        /// <summary>
+        /// Check if a specific card is in the implementation queue
+        /// </summary>
+        public bool IsCardInQueue(DraggableCard card)
+        {
+            bool inQueue = queuedCards.Contains(card);
+            Debug.Log($"🔍 Card {card.CardData?.cardName ?? "unknown"} in queue: {inQueue}");
+            return inQueue;
+        }
+        
+        /// <summary>
+        /// Get the position of a card in the implementation queue (-1 if not found)
+        /// </summary>
+        public int GetCardQueuePosition(DraggableCard card)
+        {
+            int position = queuedCards.IndexOf(card);
+            Debug.Log($"🔍 Card {card.CardData?.cardName ?? "unknown"} queue position: {position}");
+            return position;
+        }
+        /// </summary>
+        [ContextMenu("Add Effects to All Cards")]
+        public void AddEffectsToAllCards()
+        {
+            foreach (var card in queuedCards)
+            {
+                if (card != null)
+                {
+                    var effect = card.GetComponent<Effects.ImplementationEffect>();
+                    if (effect == null)
+                    {
+                        effect = card.gameObject.AddComponent<Effects.ImplementationEffect>();
+                        Debug.Log($"➕ Added ImplementationEffect to {card.CardData.cardName}");
+                    }
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Test implementation effects - now tests sequential implementation
+        /// </summary>
+        [ContextMenu("Test Implementation Effects")]
+        public void TestImplementationEffects()
+        {
+            if (Application.isPlaying)
+            {
+                StartCoroutine(TestSequentialEffectsCoroutine());
+            }
+        }
+        
+        private IEnumerator TestSequentialEffectsCoroutine()
+        {
+            Debug.Log("🧪 Testing sequential highlight effects...");
+            
+            for (int i = 0; i < queuedCards.Count; i++)
+            {
+                var card = queuedCards[i];
+                if (card != null)
+                {
+                    var effect = card.GetComponent<Effects.ImplementationEffect>();
+                    if (effect == null)
+                    {
+                        effect = card.gameObject.AddComponent<Effects.ImplementationEffect>();
+                        effect.SetDuration(implementationHighlightDuration);
+                    }
+                    
+                    Debug.Log($"🧪 Testing card {i + 1}/{queuedCards.Count}: {card.CardData.cardName}");
+                    
+                    // Step 1: Test highlight effect
+                    Debug.Log($"  Step 1: Testing highlight for {card.CardData.cardName}");
+                    yield return StartCoroutine(HighlightCardDuringImplementation(card, effect));
+                    
+                    // Step 2: Test fade out
+                    Debug.Log($"  Step 2: Testing fade out for {card.CardData.cardName}");
+                    yield return StartCoroutine(FadeOutCard(card));
+                    
+                    // Step 3: Small delay
+                    if (i < queuedCards.Count - 1)
+                    {
+                        Debug.Log($"  Step 3: Waiting before next card...");
+                        yield return new WaitForSeconds(delayBetweenCardEffects);
+                    }
+                    
+                    Debug.Log($"✅ Card {i + 1} test completed");
+                }
+            }
+            
+            Debug.Log("🧪 Sequential test completed - all cards processed one by one");
         }
         
         // Debug methods
@@ -454,15 +743,6 @@ namespace MetaBalance.Cards
             Debug.Log($"Current RP: {resourceManager?.ResearchPoints ?? 0}");
             Debug.Log($"Current CP: {resourceManager?.CommunityPoints ?? 0}");
             Debug.Log($"Can afford all: {resourceManager?.CanSpend(totalRP, totalCP) ?? false}");
-            
-            for (int i = 0; i < queuedCards.Count; i++)
-            {
-                var card = queuedCards[i];
-                if (card != null && card.CardData != null)
-                {
-                    Debug.Log($"  [{i}] {card.CardData.cardName}: {card.CardData.researchPointCost} RP, {card.CardData.communityPointCost} CP");
-                }
-            }
         }
         
         [ContextMenu("Debug: Check All Cards in Drop Zone")]
@@ -470,26 +750,52 @@ namespace MetaBalance.Cards
         {
             Debug.Log($"=== DROP ZONE CARD STATUS ({queuedCards.Count} cards) ===");
             Debug.Log($"Current Phase: {Core.PhaseManager.Instance?.GetCurrentPhase()}");
+            Debug.Log($"Is Implementing: {isImplementing}");
+            
+            if (queuedCards.Count == 0)
+            {
+                Debug.Log("📭 No cards in implementation queue");
+                return;
+            }
             
             for (int i = 0; i < queuedCards.Count; i++)
             {
                 var card = queuedCards[i];
-                if (card != null && card.CardData != null)
+                if (card != null)
                 {
-                    Debug.Log($"  [{i}] {card.CardData.cardName} - Dragging: {card.IsDraggingEnabled()} - Parent: {card.transform.parent.name}");
+                    var effect = card.GetComponent<Effects.ImplementationEffect>();
+                    string parentName = card.transform.parent?.name ?? "null";
+                    bool isInDropZone = IsCardInDropZone(card.transform.parent);
+                    
+                    Debug.Log($"  [{i}] {card.CardData.cardName}");
+                    Debug.Log($"      - Dragging Enabled: {card.IsDraggingEnabled()}");
+                    Debug.Log($"      - Has Effect: {effect != null}");
+                    Debug.Log($"      - Parent: {parentName}");
+                    Debug.Log($"      - Is In Drop Zone: {isInDropZone}");
+                    Debug.Log($"      - GameObject Active: {card.gameObject.activeInHierarchy}");
                 }
                 else
                 {
-                    Debug.Log($"  [{i}] NULL CARD OR NULL DATA");
+                    Debug.Log($"  [{i}] NULL CARD - This shouldn't happen!");
                 }
             }
         }
         
-        [ContextMenu("Debug: Trigger Resource Update")]
-        public void DebugTriggerResourceUpdate()
+        /// <summary>
+        /// Helper method to check if a transform is within a drop zone
+        /// </summary>
+        private bool IsCardInDropZone(Transform parent)
         {
-            OnCardsChanged.Invoke(GetQueuedCardData());
-            Debug.Log("Manually triggered resource preview update");
+            if (parent == null) return false;
+            
+            Transform current = parent;
+            while (current != null)
+            {
+                if (current.GetComponent<CardDropZone>() != null)
+                    return true;
+                current = current.parent;
+            }
+            return false;
         }
         
         private void OnDestroy()
@@ -497,6 +803,64 @@ namespace MetaBalance.Cards
             if (Core.PhaseManager.Instance != null)
             {
                 Core.PhaseManager.Instance.OnPhaseChanged.RemoveListener(OnPhaseChanged);
+            }
+        }
+        
+        /// <summary>
+        /// Force remove a card from queue if it's no longer a child of this drop zone
+        /// Call this periodically or when you suspect cards have been moved without proper cleanup
+        /// </summary>
+        [ContextMenu("Debug: Clean Up Orphaned Cards")]
+        public void CleanUpOrphanedCards()
+        {
+            Debug.Log("🧹 Starting cleanup of orphaned cards...");
+            
+            List<DraggableCard> cardsToRemove = new List<DraggableCard>();
+            
+            foreach (var card in queuedCards)
+            {
+                if (card == null)
+                {
+                    cardsToRemove.Add(card);
+                    Debug.Log("🗑️ Found null card in queue");
+                }
+                else if (!IsCardInDropZone(card.transform.parent))
+                {
+                    cardsToRemove.Add(card);
+                    Debug.Log($"🗑️ Found orphaned card: {card.CardData.cardName} (parent: {card.transform.parent?.name ?? "null"})");
+                }
+            }
+            
+            foreach (var cardToRemove in cardsToRemove)
+            {
+                queuedCards.Remove(cardToRemove);
+                Debug.Log($"🧹 Cleaned up orphaned card: {cardToRemove?.CardData?.cardName ?? "null card"}");
+            }
+            
+            if (cardsToRemove.Count > 0)
+            {
+                OnCardsChanged.Invoke(GetQueuedCardData());
+                Debug.Log($"✅ Cleanup complete: Removed {cardsToRemove.Count} orphaned cards");
+            }
+            else
+            {
+                Debug.Log("✅ Cleanup complete: No orphaned cards found");
+            }
+        }
+        
+        /// <summary>
+        /// Call this method when you know a card has been moved to hand but might still be in queue
+        /// This ensures the card is properly removed from implementation queue
+        /// </summary>
+        public void ForceRemoveCardFromQueue(DraggableCard card)
+        {
+            if (card == null) return;
+            
+            if (queuedCards.Contains(card))
+            {
+                queuedCards.Remove(card);
+                OnCardsChanged.Invoke(GetQueuedCardData());
+                Debug.Log($"🔧 Force removed {card.CardData.cardName} from implementation queue");
             }
         }
     }
