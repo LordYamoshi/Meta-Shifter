@@ -6,7 +6,7 @@ using UnityEngine.UI;
 namespace MetaBalance.Cards
 {
     /// <summary>
-    /// Simplified DraggableCard without position preservation complexity
+    /// Fixed DraggableCard with proper drop zone cleanup
     /// </summary>
     public class DraggableCard : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHandler
     {
@@ -31,6 +31,9 @@ namespace MetaBalance.Cards
         private Transform originalParent;
         private bool isDragging = false;
         private bool draggingEnabled = true;
+        
+        // Track which drop zone we were in (if any)
+        private CardDropZone currentDropZone = null;
 
         public CardData CardData => cardData;
 
@@ -54,6 +57,9 @@ namespace MetaBalance.Cards
             {
                 UpdateCardDisplay();
             }
+            
+            // Initialize current drop zone reference
+            UpdateCurrentDropZoneReference();
         }
 
         private void AutoFindUIComponents()
@@ -249,21 +255,71 @@ namespace MetaBalance.Cards
             UpdateAffordabilityDisplay();
         }
 
+        /// <summary>
+        /// Update our reference to which drop zone we're currently in (if any)
+        /// </summary>
+        private void UpdateCurrentDropZoneReference()
+        {
+            currentDropZone = GetParentDropZone();
+            
+            if (currentDropZone != null)
+            {
+                Debug.Log($"🎯 {cardData?.cardName} is now in drop zone: {currentDropZone.name}");
+            }
+            else
+            {
+                Debug.Log($"🏠 {cardData?.cardName} is now in hand/other location");
+            }
+        }
+
+        /// <summary>
+        /// Get the drop zone that contains this card (if any)
+        /// </summary>
+        private CardDropZone GetParentDropZone()
+        {
+            Transform current = transform.parent;
+            while (current != null)
+            {
+                var dropZone = current.GetComponent<CardDropZone>();
+                if (dropZone != null)
+                    return dropZone;
+                current = current.parent;
+            }
+            return null;
+        }
+
         // Drag and Drop Implementation
         public void OnBeginDrag(PointerEventData eventData)
         {
-            if (!draggingEnabled) return;
+            if (!draggingEnabled) 
+            {
+                Debug.Log($"❌ Drag blocked: dragging disabled for {cardData?.cardName}");
+                return;
+            }
             
             if (Core.PhaseManager.Instance?.GetCurrentPhase() != Core.GamePhase.Planning)
+            {
+                Debug.Log($"❌ Drag blocked: not in planning phase for {cardData?.cardName}");
                 return;
+            }
             
-            bool isInDropZone = IsCardInDropZone();
+            // Store current drop zone reference
+            CardDropZone startingDropZone = GetParentDropZone();
+            bool isInDropZone = startingDropZone != null;
+            
+            // Check affordability only if we're starting from hand (not drop zone)
             if (!isInDropZone && !CanAffordCard())
+            {
+                Debug.Log($"❌ Drag blocked: cannot afford {cardData?.cardName}");
                 return;
+            }
+            
+            Debug.Log($"🚀 Starting drag for {cardData?.cardName} from {(isInDropZone ? "drop zone" : "hand")}");
             
             isDragging = true;
             originalPosition = rectTransform.position;
             originalParent = transform.parent;
+            currentDropZone = startingDropZone; // Store reference to starting drop zone
             
             // Visual feedback during drag
             canvasGroup.alpha = 0.7f;
@@ -284,38 +340,118 @@ namespace MetaBalance.Cards
         {
             if (!isDragging) return;
             
+            Debug.Log($"🎯 Ending drag for {cardData?.cardName}");
+            
             isDragging = false;
             canvasGroup.alpha = 1f;
             canvasGroup.blocksRaycasts = true;
             
-            // Check what happened
-            bool wasInDropZone = IsCardInDropZone(originalParent);
-            bool isInDropZone = transform.parent != canvas.transform && IsCardInDropZone();
-            bool isInHand = transform.parent != canvas.transform && IsCardInHand();
+            // Determine what happened during the drag
+            CardDropZone startingDropZone = currentDropZone; // Where we started
+            CardDropZone newDropZone = GetParentDropZone(); // Where we ended up
+            bool isInHand = transform.parent.GetComponent<HandDropZone>() != null;
+            bool droppedOnCanvas = transform.parent == canvas.transform;
             
-            if (transform.parent == canvas.transform)
+            Debug.Log($"🔍 Drag analysis for {cardData?.cardName}:");
+            Debug.Log($"  - Started from: {(startingDropZone != null ? startingDropZone.name : "hand")}");
+            Debug.Log($"  - Ended in: {(newDropZone != null ? newDropZone.name : (isInHand ? "hand" : "canvas/other"))}");
+            Debug.Log($"  - Dropped on canvas: {droppedOnCanvas}");
+            
+            if (droppedOnCanvas)
             {
-                // Not accepted, return to original location
+                // Card was dropped somewhere invalid - return to original location
+                Debug.Log($"🔄 Returning {cardData?.cardName} to original position");
                 ReturnToOriginalPosition();
             }
-            else if (wasInDropZone && isInHand)
+            else if (startingDropZone != null && newDropZone == null && isInHand)
             {
-                // Moved from drop zone to hand
-                RemoveFromDropZone();
-            }
-            else if (!wasInDropZone && isInDropZone)
-            {
-                // Moved from hand to drop zone
-                if (Cards.CardManager.Instance != null)
+                // CRITICAL: Card moved from drop zone to hand - must remove from queue!
+                Debug.Log($"🚨 CRITICAL: {cardData?.cardName} moved from drop zone to hand - removing from queue");
+                
+                // Remove from the original drop zone's queue
+                startingDropZone.ForceRemoveCardFromQueue(this);
+                
+                // Ensure CardManager knows this card is back in hand
+                if (CardManager.Instance != null)
                 {
-                    Cards.CardManager.Instance.RemoveCardFromHand(this);
+                    CardManager.Instance.ReturnCardToHand(this);
+                }
+                
+                // Update our drop zone reference
+                currentDropZone = null;
+                
+                Debug.Log($"✅ {cardData?.cardName} successfully unqueued and returned to hand");
+            }
+            else if (startingDropZone == null && newDropZone != null)
+            {
+                // Card moved from hand to drop zone
+                Debug.Log($"📥 {cardData?.cardName} moved from hand to drop zone");
+                
+                // Remove from hand manager
+                if (CardManager.Instance != null)
+                {
+                    CardManager.Instance.RemoveCardFromHand(this);
+                }
+                
+                // Update our drop zone reference
+                currentDropZone = newDropZone;
+            }
+            else if (startingDropZone != null && newDropZone != null && startingDropZone != newDropZone)
+            {
+                // Card moved from one drop zone to another
+                Debug.Log($"🔄 {cardData?.cardName} moved between drop zones");
+                
+                // Remove from old drop zone
+                startingDropZone.ForceRemoveCardFromQueue(this);
+                
+                // The new drop zone should handle adding it via OnDrop
+                currentDropZone = newDropZone;
+            }
+            
+            // Final verification
+            VerifyCardState();
+        }
+        
+        /// <summary>
+        /// Verify that the card's state is consistent after drag operations
+        /// </summary>
+        private void VerifyCardState()
+        {
+            CardDropZone actualDropZone = GetParentDropZone();
+            bool isInHand = transform.parent.GetComponent<HandDropZone>() != null;
+            
+            // Update our reference to match reality
+            currentDropZone = actualDropZone;
+            
+            Debug.Log($"🔍 Final state verification for {cardData?.cardName}:");
+            Debug.Log($"  - Actually in drop zone: {actualDropZone?.name ?? "none"}");
+            Debug.Log($"  - Is in hand zone: {isInHand}");
+            Debug.Log($"  - Parent: {transform.parent?.name ?? "null"}");
+            
+            // If we're in a drop zone, make sure we're in its queue
+            if (actualDropZone != null && !actualDropZone.IsCardInQueue(this))
+            {
+                Debug.LogWarning($"⚠️ {cardData?.cardName} is visually in drop zone but not in queue - this may cause issues");
+            }
+            
+            // If we're not in a drop zone, make sure no drop zone has us in their queue
+            if (actualDropZone == null)
+            {
+                var allDropZones = FindObjectsOfType<CardDropZone>();
+                foreach (var dropZone in allDropZones)
+                {
+                    if (dropZone.IsCardInQueue(this))
+                    {
+                        Debug.LogWarning($"⚠️ {cardData?.cardName} is not in drop zone but {dropZone.name} still has it queued - fixing");
+                        dropZone.ForceRemoveCardFromQueue(this);
+                    }
                 }
             }
         }
         
         private bool IsCardInDropZone()
         {
-            return IsCardInDropZone(transform.parent);
+            return GetParentDropZone() != null;
         }
         
         private bool IsCardInDropZone(Transform parent)
@@ -325,7 +461,7 @@ namespace MetaBalance.Cards
             Transform current = parent;
             while (current != null)
             {
-                if (current.GetComponent<Cards.CardDropZone>() != null)
+                if (current.GetComponent<CardDropZone>() != null)
                     return true;
                 current = current.parent;
             }
@@ -335,42 +471,35 @@ namespace MetaBalance.Cards
         
         private bool IsCardInHand()
         {
-            return transform.parent.GetComponent<Cards.HandDropZone>() != null;
+            return transform.parent.GetComponent<HandDropZone>() != null;
         }
         
         private void ReturnToOriginalPosition()
         {
             transform.SetParent(originalParent, false);
             rectTransform.position = originalPosition;
-        }
-        
-        private void RemoveFromDropZone()
-        {
-            Transform current = originalParent;
-            while (current != null)
-            {
-                var dropZone = current.GetComponent<Cards.CardDropZone>();
-                if (dropZone != null)
-                {
-                    dropZone.RemoveCard(this);
-                    return;
-                }
-                current = current.parent;
-            }
             
-            if (Cards.CardManager.Instance != null)
-            {
-                Cards.CardManager.Instance.ReturnCardToHand(this);
-            }
+            // Restore our drop zone reference to what it was
+            currentDropZone = GetParentDropZone();
         }
         
         public void ReturnToHand()
         {
-            if (originalParent != null)
+            // Find the hand drop zone
+            var handDropZone = FindObjectOfType<HandDropZone>();
+            if (handDropZone != null)
+            {
+                transform.SetParent(handDropZone.transform, false);
+            }
+            else if (originalParent != null)
             {
                 transform.SetParent(originalParent, false);
-                draggingEnabled = true;
             }
+            
+            draggingEnabled = true;
+            currentDropZone = null;
+            
+            Debug.Log($"🏠 {cardData?.cardName} returned to hand");
         }
 
         // Debug Methods
@@ -390,8 +519,23 @@ namespace MetaBalance.Cards
             Debug.Log($"Current Phase: {Core.PhaseManager.Instance?.GetCurrentPhase()}");
             Debug.Log($"Is Planning Phase: {Core.PhaseManager.Instance?.GetCurrentPhase() == Core.GamePhase.Planning}");
             Debug.Log($"Parent: {transform.parent?.name ?? "NULL"}");
+            Debug.Log($"Current Drop Zone: {currentDropZone?.name ?? "none"}");
             Debug.Log($"IsInDropZone: {IsCardInDropZone()}");
             Debug.Log($"CanAffordCard: {CanAffordCard()}");
+        }
+
+        [ContextMenu("Debug: Verify Card State")]
+        public void DebugVerifyCardState()
+        {
+            VerifyCardState();
+        }
+
+        [ContextMenu("Debug: Force Update Drop Zone Reference")]
+        public void DebugForceUpdateDropZoneReference()
+        {
+            CardDropZone oldRef = currentDropZone;
+            UpdateCurrentDropZoneReference();
+            Debug.Log($"🔄 Updated drop zone reference: {oldRef?.name ?? "null"} → {currentDropZone?.name ?? "null"}");
         }
     }
 }
