@@ -5,159 +5,178 @@ using TMPro;
 namespace MetaBalance.UI
 {
     /// <summary>
-    /// Individual community feed item component
+    /// Minimal Community Feed Item - ONLY updates text content and colors
+    /// Does NOT touch positioning, sizing, layout, backgrounds, or create any objects
     /// </summary>
     public class CommunityFeedItem : MonoBehaviour
     {
-        [Header("UI References")]
+        [Header("Text References - Just Assign These")]
         [SerializeField] private TextMeshProUGUI authorText;
         [SerializeField] private TextMeshProUGUI contentText;
         [SerializeField] private TextMeshProUGUI timestampText;
-        [SerializeField] private TextMeshProUGUI segmentText;
         [SerializeField] private TextMeshProUGUI upvotesText;
         [SerializeField] private TextMeshProUGUI repliesText;
-        [SerializeField] private Image backgroundImage;
-        [SerializeField] private Image sentimentIndicator;
-        [SerializeField] private Image typeIcon;
-        [SerializeField] private GameObject highlightBorder;
+        [SerializeField] private TextMeshProUGUI segmentBadgeText; // Only if you have a badge
         
-        [Header("Visual Settings")]
-        [SerializeField] private Color defaultBackgroundColor = new Color(0.1f, 0.1f, 0.1f, 0.8f);
-        [SerializeField] private Color highlightBackgroundColor = new Color(0.2f, 0.4f, 0.6f, 0.9f);
+        [Header("Optional Image References")]
+        [SerializeField] private Image leftBorderImage;          // Only if you want border color to change
+        [SerializeField] private Image segmentBadgeBackground;   // Only if you want badge color to change
+        [SerializeField] private GameObject segmentBadge;        // Only if you want to show/hide badge
+        
+        [Header("Colors for Different Segments")]
+        [SerializeField] private Color proPlayerColor = new Color(1f, 0.8f, 0.2f, 1f);      // Gold
+        [SerializeField] private Color contentCreatorColor = new Color(0.8f, 0.2f, 0.8f, 1f); // Purple
+        [SerializeField] private Color competitiveColor = new Color(1f, 0.4f, 0.1f, 1f);     // Orange
+        [SerializeField] private Color casualColor = new Color(0.6f, 0.8f, 1f, 1f);          // Light Blue
+        
+        [Header("Colors for Sentiment")]
+        [SerializeField] private Color positiveColor = new Color(0.2f, 0.8f, 0.2f, 1f);  // Green
+        [SerializeField] private Color negativeColor = new Color(0.8f, 0.2f, 0.2f, 1f);  // Red
+        [SerializeField] private Color neutralColor = new Color(0.6f, 0.6f, 0.6f, 1f);   // Gray
         
         private Community.CommunityFeedback currentFeedback;
-        private bool isHighlighted = false;
         
-        private void Awake()
-        {
-            AutoFindComponents();
-        }
-        
-        private void AutoFindComponents()
-        {
-            if (authorText == null)
-                authorText = transform.Find("Header/Author")?.GetComponent<TextMeshProUGUI>();
-            
-            if (contentText == null)
-                contentText = transform.Find("Content")?.GetComponent<TextMeshProUGUI>();
-            
-            if (timestampText == null)
-                timestampText = transform.Find("Footer/Timestamp")?.GetComponent<TextMeshProUGUI>();
-            
-            if (segmentText == null)
-                segmentText = transform.Find("Header/Segment")?.GetComponent<TextMeshProUGUI>();
-            
-            if (upvotesText == null)
-                upvotesText = transform.Find("Footer/Upvotes")?.GetComponent<TextMeshProUGUI>();
-            
-            if (repliesText == null)
-                repliesText = transform.Find("Footer/Replies")?.GetComponent<TextMeshProUGUI>();
-            
-            if (backgroundImage == null)
-                backgroundImage = GetComponent<Image>();
-            
-            if (sentimentIndicator == null)
-                sentimentIndicator = transform.Find("SentimentIndicator")?.GetComponent<Image>();
-            
-            if (typeIcon == null)
-                typeIcon = transform.Find("Header/TypeIcon")?.GetComponent<Image>();
-            
-            if (highlightBorder == null)
-                highlightBorder = transform.Find("HighlightBorder")?.gameObject;
-        }
-        
-        public void Setup(Community.CommunityFeedback feedback)
+        public void SetupWithProPlayerSupport(Community.CommunityFeedback feedback)
         {
             currentFeedback = feedback;
-            UpdateDisplay();
-        }
-        
-        private void UpdateDisplay()
-        {
-            if (currentFeedback == null) return;
             
+            // ONLY update text content and colors - nothing else
             UpdateTextContent();
-            UpdateVisualStyling();
-            UpdateEngagementDisplay();
-            RefreshTimestamp();
+            UpdateTextColors();
+            UpdateBadgeIfExists();
+            UpdateBorderIfExists();
+            
+            Debug.Log($"✅ Updated text for: {feedback.author} ({feedback.communitySegment})");
         }
         
         private void UpdateTextContent()
         {
+            // Update author name
             if (authorText != null)
             {
                 authorText.text = currentFeedback.author;
-                authorText.color = GetAuthorColor();
             }
             
+            // Update content text
             if (contentText != null)
             {
                 contentText.text = currentFeedback.content;
             }
             
-            if (segmentText != null)
+            // Update timestamp
+            if (timestampText != null)
             {
-                segmentText.text = currentFeedback.communitySegment;
-                segmentText.color = GetSegmentColor(currentFeedback.communitySegment);
-            }
-        }
-        
-        private void UpdateVisualStyling()
-        {
-            if (backgroundImage != null)
-            {
-                backgroundImage.color = isHighlighted ? highlightBackgroundColor : defaultBackgroundColor;
+                timestampText.text = currentFeedback.GetTimeAgo();
             }
             
-            if (sentimentIndicator != null)
-            {
-                sentimentIndicator.color = currentFeedback.GetSentimentColor();
-                
-                float alpha = Mathf.Lerp(0.3f, 1f, Mathf.Abs(currentFeedback.sentiment));
-                var color = sentimentIndicator.color;
-                color.a = alpha;
-                sentimentIndicator.color = color;
-            }
-            
-            if (typeIcon != null)
-            {
-                typeIcon.sprite = GetTypeIcon(currentFeedback.feedbackType);
-                typeIcon.color = GetTypeColor(currentFeedback.feedbackType);
-            }
-            
-            if (highlightBorder != null)
-            {
-                highlightBorder.SetActive(isHighlighted);
-            }
-        }
-        
-        private void UpdateEngagementDisplay()
-        {
+            // Update upvotes
             if (upvotesText != null)
             {
                 if (currentFeedback.upvotes > 0)
                 {
-                    upvotesText.text = $"👍 {FormatNumber(currentFeedback.upvotes)}";
-                    upvotesText.gameObject.SetActive(true);
+                    upvotesText.text = $"👍 {currentFeedback.upvotes}";
                 }
                 else
                 {
-                    upvotesText.gameObject.SetActive(false);
+                    upvotesText.text = "";
                 }
             }
             
+            // Update replies
             if (repliesText != null)
             {
                 if (currentFeedback.replies > 0)
                 {
-                    repliesText.text = $"💬 {FormatNumber(currentFeedback.replies)}";
-                    repliesText.gameObject.SetActive(true);
+                    repliesText.text = $"💬 {currentFeedback.replies}";
                 }
                 else
                 {
-                    repliesText.gameObject.SetActive(false);
+                    repliesText.text = "";
                 }
             }
+            
+            // Update badge text
+            if (segmentBadgeText != null)
+            {
+                segmentBadgeText.text = GetBadgeText();
+            }
+        }
+        
+        private void UpdateTextColors()
+        {
+            // Change author text color based on segment
+            if (authorText != null)
+            {
+                authorText.color = GetSegmentColor();
+            }
+            
+            // Keep other text colors as they are - don't change them
+            // Content text, timestamp, upvotes, replies stay their existing colors
+        }
+        
+        private void UpdateBadgeIfExists()
+        {
+            // Only if you have a badge assigned
+            if (segmentBadge != null)
+            {
+                // Show badge for everyone except casual players
+                bool shouldShow = currentFeedback.communitySegment != "Casual Players";
+                segmentBadge.SetActive(shouldShow);
+            }
+            
+            // Change badge background color if you have one
+            if (segmentBadgeBackground != null)
+            {
+                segmentBadgeBackground.color = GetSegmentColor();
+            }
+            
+            // Badge text color stays white
+            if (segmentBadgeText != null)
+            {
+                segmentBadgeText.color = Color.white;
+            }
+        }
+        
+        private void UpdateBorderIfExists()
+        {
+            // Only if you have a left border assigned
+            if (leftBorderImage != null)
+            {
+                leftBorderImage.color = GetSentimentColor();
+            }
+        }
+        
+        private string GetBadgeText()
+        {
+            return currentFeedback.communitySegment switch
+            {
+                "Pro Players" => "Pro Player",
+                "Content Creators" => "Content Creator", 
+                "Competitive" => "Competitive",
+                _ => "VIP"
+            };
+        }
+        
+        private Color GetSegmentColor()
+        {
+            return currentFeedback.communitySegment switch
+            {
+                "Pro Players" => proPlayerColor,
+                "Content Creators" => contentCreatorColor,
+                "Competitive" => competitiveColor,
+                "Casual Players" => casualColor,
+                _ => Color.white
+            };
+        }
+        
+        private Color GetSentimentColor()
+        {
+            if (currentFeedback.sentiment > 0.2f)
+                return positiveColor;
+            else if (currentFeedback.sentiment < -0.2f)
+                return negativeColor;
+            else
+                return neutralColor;
         }
         
         public void RefreshTimestamp()
@@ -168,156 +187,59 @@ namespace MetaBalance.UI
             }
         }
         
-        public void SetHighlighted(bool highlighted)
+        // Legacy compatibility
+        public void Setup(Community.CommunityFeedback feedback)
         {
-            isHighlighted = highlighted;
-            UpdateVisualStyling();
+            SetupWithProPlayerSupport(feedback);
         }
         
-        private Color GetAuthorColor()
+        // Test methods
+        [ContextMenu("🧪 Test Pro Player")]
+        public void TestProPlayer()
         {
-            return currentFeedback.communitySegment switch
+            var testFeedback = new Community.CommunityFeedback
             {
-                "Pro Players" => new Color(1f, 0.8f, 0.2f),
-                "Content Creators" => new Color(0.8f, 0.2f, 0.8f),
-                "Competitive" => new Color(0.2f, 0.8f, 0.2f),
-                "Casual Players" => new Color(0.4f, 0.7f, 1f),
-                _ => Color.white
+                author = "TSM_Legend",
+                content = "Finally! Warrior feels balanced now 💪 These health changes improve competitive diversity",
+                sentiment = 0.8f,
+                communitySegment = "Pro Players",
+                upvotes = 45,
+                replies = 12,
+                timestamp = System.DateTime.Now
             };
+            SetupWithProPlayerSupport(testFeedback);
         }
         
-        private Color GetSegmentColor(string segment)
+        [ContextMenu("🧪 Test Content Creator")]
+        public void TestContentCreator()
         {
-            return segment switch
+            var testFeedback = new Community.CommunityFeedback
             {
-                "Pro Players" => new Color(1f, 0.8f, 0.2f, 0.8f),
-                "Content Creators" => new Color(0.8f, 0.2f, 0.8f, 0.8f),
-                "Competitive" => new Color(0.2f, 0.8f, 0.2f, 0.8f),
-                "Casual Players" => new Color(0.4f, 0.7f, 1f, 0.8f),
-                _ => new Color(0.7f, 0.7f, 0.7f, 0.8f)
+                author = "GameGuruYT",
+                content = "Support utility nerf feels too harsh 😔 Making a reaction video tonight!",
+                sentiment = -0.6f,
+                communitySegment = "Content Creators",
+                upvotes = 87,
+                replies = 34,
+                timestamp = System.DateTime.Now.AddMinutes(-5)
             };
+            SetupWithProPlayerSupport(testFeedback);
         }
         
-        private Sprite GetTypeIcon(Community.FeedbackType feedbackType)
+        [ContextMenu("🧪 Test Casual (No Badge)")]
+        public void TestCasual()
         {
-            // Return appropriate icon sprite based on feedback type
-            // For now, return null - icons would be loaded from Resources or assigned in inspector
-            return null;
-        }
-        
-        private Color GetTypeColor(Community.FeedbackType feedbackType)
-        {
-            return feedbackType switch
+            var testFeedback = new Community.CommunityFeedback
             {
-                Community.FeedbackType.BalanceReaction => new Color(1f, 0.6f, 0.2f),
-                Community.FeedbackType.PopularityShift => new Color(0.2f, 0.8f, 0.8f),
-                Community.FeedbackType.MetaAnalysis => new Color(0.6f, 0.2f, 1f),
-                Community.FeedbackType.ProPlayerOpinion => new Color(1f, 0.8f, 0.2f),
-                Community.FeedbackType.CasualPlayerFeedback => new Color(0.4f, 0.7f, 1f),
-                Community.FeedbackType.ContentCreator => new Color(0.8f, 0.2f, 0.8f),
-                Community.FeedbackType.CompetitiveScene => new Color(0.2f, 0.8f, 0.2f),
-                Community.FeedbackType.Meme => new Color(1f, 1f, 0.2f),
-                Community.FeedbackType.Bug => new Color(1f, 0.2f, 0.2f),
-                Community.FeedbackType.Suggestion => new Color(0.2f, 1f, 0.2f),
-                _ => Color.white
+                author = "CasualGamer42",
+                content = "Love the Warrior changes! Feels more fun to play now 😊",
+                sentiment = 0.7f,
+                communitySegment = "Casual Players",
+                upvotes = 19,
+                replies = 3,
+                timestamp = System.DateTime.Now.AddMinutes(-9)
             };
-        }
-        
-        private string FormatNumber(int number)
-        {
-            return number switch
-            {
-                >= 1000000 => $"{number / 1000000f:F1}M",
-                >= 1000 => $"{number / 1000f:F1}K",
-                _ => number.ToString()
-            };
-        }
-        
-        public void OnItemClicked()
-        {
-            StartCoroutine(AnimateClick());
-        }
-        
-        private System.Collections.IEnumerator AnimateClick()
-        {
-            var rectTransform = GetComponent<RectTransform>();
-            Vector3 originalScale = rectTransform.localScale;
-            
-            float elapsed = 0f;
-            while (elapsed < 0.1f)
-            {
-                elapsed += Time.deltaTime;
-                float scale = Mathf.Lerp(1f, 0.95f, elapsed / 0.1f);
-                rectTransform.localScale = originalScale * scale;
-                yield return null;
-            }
-            
-            elapsed = 0f;
-            while (elapsed < 0.1f)
-            {
-                elapsed += Time.deltaTime;
-                float scale = Mathf.Lerp(0.95f, 1f, elapsed / 0.1f);
-                rectTransform.localScale = originalScale * scale;
-                yield return null;
-            }
-            
-            rectTransform.localScale = originalScale;
-        }
-        
-        public void ShowDetailedView()
-        {
-            Debug.Log($"Showing details for feedback from {currentFeedback.author}: {currentFeedback.content}");
-        }
-        
-        public void SetViral(bool isViral)
-        {
-            if (isViral)
-            {
-                StartCoroutine(ViralEffect());
-            }
-        }
-        
-        private System.Collections.IEnumerator ViralEffect()
-        {
-            for (int i = 0; i < 3; i++)
-            {
-                if (sentimentIndicator != null)
-                {
-                    var originalColor = sentimentIndicator.color;
-                    
-                    sentimentIndicator.color = Color.yellow;
-                    yield return new WaitForSeconds(0.2f);
-                    
-                    sentimentIndicator.color = originalColor;
-                    yield return new WaitForSeconds(0.3f);
-                }
-            }
-        }
-        
-        public void UpdateSentiment(float newSentiment)
-        {
-            if (currentFeedback != null)
-            {
-                currentFeedback.sentiment = newSentiment;
-                UpdateVisualStyling();
-            }
-        }
-        
-        public void SimulateEngagementGrowth()
-        {
-            if (currentFeedback == null) return;
-            
-            if (Random.Range(0f, 1f) < 0.3f)
-            {
-                currentFeedback.upvotes += Random.Range(1, 5);
-            }
-            
-            if (Random.Range(0f, 1f) < 0.2f)
-            {
-                currentFeedback.replies += Random.Range(0, 2);
-            }
-            
-            UpdateEngagementDisplay();
+            SetupWithProPlayerSupport(testFeedback);
         }
     }
 }

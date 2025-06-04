@@ -3,63 +3,61 @@ using UnityEngine.UI;
 using TMPro;
 using System.Collections.Generic;
 using System.Linq;
-using System.Collections;
 
 namespace MetaBalance.UI
 {
     /// <summary>
-    /// UI Manager for displaying community feedback in the community feed
+    /// Minimal Community Feed Manager - Just manages text updates, doesn't mess with layouts
+    /// Works with your existing UI setup and feed item prefabs
     /// </summary>
     public class CommunityFeedUIManager : MonoBehaviour
     {
-        [Header("UI References")]
-        [SerializeField] private Transform feedContainer;
-        [SerializeField] private GameObject feedItemPrefab;
-        [SerializeField] private ScrollRect feedScrollRect;
+        [Header("Basic UI References")]
+        [SerializeField] private Transform communityFeedContainer;  // Your existing container
+        [SerializeField] private GameObject feedItemPrefab;         // Your existing prefab
+        [SerializeField] private int maxVisibleItems = 15;
+        
+        [Header("Tab Controls (Optional)")]
         [SerializeField] private Button communityTabButton;
         [SerializeField] private Button eventsTabButton;
+        [SerializeField] private GameObject communityFeedPanel;
+        [SerializeField] private GameObject eventsPanel;
+        
+        [Header("Sentiment Display (Optional)")]
         [SerializeField] private TextMeshProUGUI sentimentText;
         [SerializeField] private Slider sentimentSlider;
         
-        [Header("Feed Settings")]
-        [SerializeField] private int maxVisibleItems = 15;
-        [SerializeField] private float newItemAnimationDuration = 0.5f;
-        [SerializeField] private float feedRefreshInterval = 2f;
-        
-        [Header("Visual Settings")]
-        [SerializeField] private Color positiveColor = new Color(0.2f, 0.8f, 0.2f);
-        [SerializeField] private Color neutralColor = new Color(0.8f, 0.8f, 0.8f);
-        [SerializeField] private Color negativeColor = new Color(0.8f, 0.2f, 0.2f);
-        
-        // Object pool for feed items
-        private Queue<CommunityFeedItem> feedItemPool = new Queue<CommunityFeedItem>();
+        // Simple lists to track active items
         private List<CommunityFeedItem> activeFeedItems = new List<CommunityFeedItem>();
-        
-        // State management
         private bool showingCommunityFeed = true;
-        private Queue<Community.CommunityFeedback> pendingFeedback = new Queue<Community.CommunityFeedback>();
         
         private void Start()
         {
-            InitializeUI();
+            SetupBasicUI();
             SubscribeToEvents();
-            InitializeFeedItemPool();
-            StartCoroutine(FeedRefreshCoroutine());
         }
         
-        private void InitializeUI()
+        private void SetupBasicUI()
         {
-            if (communityTabButton != null)
+            // Auto-find container if not assigned
+            if (communityFeedContainer == null)
             {
-                communityTabButton.onClick.AddListener(() => SwitchTab(true));
+                var found = GameObject.Find("CommunityContent");
+                if (found != null)
+                    communityFeedContainer = found.transform;
             }
+            
+            // Setup tab buttons if you have them
+            if (communityTabButton != null)
+                communityTabButton.onClick.AddListener(() => SwitchToTab(true));
             
             if (eventsTabButton != null)
-            {
-                eventsTabButton.onClick.AddListener(() => SwitchTab(false));
-            }
+                eventsTabButton.onClick.AddListener(() => SwitchToTab(false));
+                
+            // Start with community tab
+            SwitchToTab(true);
             
-            SwitchTab(true);
+            // Set initial sentiment
             UpdateSentimentDisplay(65f);
         }
         
@@ -68,142 +66,53 @@ namespace MetaBalance.UI
             if (Community.CommunityFeedbackManager.Instance != null)
             {
                 Community.CommunityFeedbackManager.Instance.OnNewFeedbackAdded.AddListener(OnNewFeedbackReceived);
-                Community.CommunityFeedbackManager.Instance.OnCommunitySentimentChanged.AddListener(OnSentimentChanged);
-            }
-            
-            if (Core.PhaseManager.Instance != null)
-            {
-                Core.PhaseManager.Instance.OnPhaseChanged.AddListener(OnPhaseChanged);
-            }
-        }
-        
-        private void InitializeFeedItemPool()
-        {
-            for (int i = 0; i < maxVisibleItems + 5; i++)
-            {
-                var item = CreateFeedItem();
-                if (item != null)
-                {
-                    item.gameObject.SetActive(false);
-                    feedItemPool.Enqueue(item);
-                }
-            }
-        }
-        
-        private CommunityFeedItem CreateFeedItem()
-        {
-            if (feedItemPrefab == null || feedContainer == null)
-            {
-                Debug.LogError("Feed item prefab or container not assigned!");
-                return null;
-            }
-            
-            GameObject itemObject = Instantiate(feedItemPrefab, feedContainer);
-            var feedItem = itemObject.GetComponent<CommunityFeedItem>();
-            
-            if (feedItem == null)
-            {
-                feedItem = itemObject.AddComponent<CommunityFeedItem>();
-            }
-            
-            return feedItem;
-        }
-        
-        private void OnPhaseChanged(Core.GamePhase newPhase)
-        {
-            if (newPhase == Core.GamePhase.Feedback)
-            {
-                HighlightFeedForPhase();
+                Community.CommunityFeedbackManager.Instance.OnCommunitySentimentChanged.AddListener(UpdateSentimentDisplay);
             }
         }
         
         private void OnNewFeedbackReceived(Community.CommunityFeedback feedback)
         {
-            pendingFeedback.Enqueue(feedback);
-            
-            if (pendingFeedback.Count <= 3)
+            if (showingCommunityFeed)
             {
-                ProcessPendingFeedback();
+                AddFeedItem(feedback);
             }
         }
         
-        private void OnSentimentChanged(float newSentiment)
+        private void AddFeedItem(Community.CommunityFeedback feedback)
         {
-            UpdateSentimentDisplay(newSentiment);
-        }
-        
-        private IEnumerator FeedRefreshCoroutine()
-        {
-            while (true)
+            if (feedItemPrefab == null || communityFeedContainer == null)
             {
-                yield return new WaitForSeconds(feedRefreshInterval);
-                
-                if (pendingFeedback.Count > 0)
-                {
-                    ProcessPendingFeedback();
-                }
-                
-                RefreshActiveFeedItems();
+                Debug.LogError("Feed item prefab or container not assigned!");
+                return;
             }
-        }
-        
-        private void ProcessPendingFeedback()
-        {
-            int processed = 0;
-            const int maxProcessPerFrame = 2;
             
-            while (pendingFeedback.Count > 0 && processed < maxProcessPerFrame)
+            // Create new feed item using your prefab
+            GameObject newItemObj = Instantiate(feedItemPrefab, communityFeedContainer);
+            
+            // Get the CommunityFeedItem component
+            var feedItem = newItemObj.GetComponent<CommunityFeedItem>();
+            if (feedItem == null)
             {
-                var feedback = pendingFeedback.Dequeue();
-                if (showingCommunityFeed)
-                {
-                    DisplayFeedbackItem(feedback);
-                }
-                processed++;
+                Debug.LogWarning("Feed item prefab doesn't have CommunityFeedItem component - adding one");
+                feedItem = newItemObj.AddComponent<CommunityFeedItem>();
             }
-        }
-        
-        private void DisplayFeedbackItem(Community.CommunityFeedback feedback)
-        {
-            var feedItem = GetPooledFeedItem();
-            if (feedItem == null) return;
             
-            feedItem.Setup(feedback);
-            feedItem.gameObject.SetActive(true);
+            // Setup the feed item with your data
+            feedItem.SetupWithProPlayerSupport(feedback);
             
+            // Add to our tracking list
             activeFeedItems.Insert(0, feedItem);
-            feedItem.transform.SetAsFirstSibling();
             
-            StartCoroutine(AnimateFeedItemIn(feedItem));
+            // Move to top (your layout group should handle positioning)
+            newItemObj.transform.SetAsFirstSibling();
             
-            if (activeFeedItems.Count > maxVisibleItems)
+            // Remove old items if we have too many
+            while (activeFeedItems.Count > maxVisibleItems)
             {
                 RemoveOldestFeedItem();
             }
             
-            if (feedScrollRect != null)
-            {
-                feedScrollRect.verticalNormalizedPosition = 1f;
-            }
-        }
-        
-        private CommunityFeedItem GetPooledFeedItem()
-        {
-            if (feedItemPool.Count > 0)
-            {
-                return feedItemPool.Dequeue();
-            }
-            
-            return CreateFeedItem();
-        }
-        
-        private void ReturnFeedItemToPool(CommunityFeedItem item)
-        {
-            if (item == null) return;
-            
-            item.gameObject.SetActive(false);
-            item.transform.SetParent(feedContainer);
-            feedItemPool.Enqueue(item);
+            Debug.Log($"✅ Added feed item: {feedback.author} - Total items: {activeFeedItems.Count}");
         }
         
         private void RemoveOldestFeedItem()
@@ -213,154 +122,71 @@ namespace MetaBalance.UI
             var oldestItem = activeFeedItems[activeFeedItems.Count - 1];
             activeFeedItems.RemoveAt(activeFeedItems.Count - 1);
             
-            StartCoroutine(AnimateFeedItemOut(oldestItem));
-        }
-        
-        private IEnumerator AnimateFeedItemIn(CommunityFeedItem item)
-        {
-            if (item == null) yield break;
-            
-            var canvasGroup = item.GetComponent<CanvasGroup>();
-            if (canvasGroup == null)
-                canvasGroup = item.gameObject.AddComponent<CanvasGroup>();
-            
-            var rectTransform = item.GetComponent<RectTransform>();
-            Vector3 originalPosition = rectTransform.localPosition;
-            Vector3 startPosition = originalPosition + Vector3.right * 300f;
-            
-            rectTransform.localPosition = startPosition;
-            canvasGroup.alpha = 0f;
-            
-            float elapsed = 0f;
-            while (elapsed < newItemAnimationDuration)
+            if (oldestItem != null && oldestItem.gameObject != null)
             {
-                elapsed += Time.deltaTime;
-                float t = elapsed / newItemAnimationDuration;
-                float easedT = 1f - Mathf.Pow(1f - t, 3f);
-                
-                rectTransform.localPosition = Vector3.Lerp(startPosition, originalPosition, easedT);
-                canvasGroup.alpha = easedT;
-                
-                yield return null;
-            }
-            
-            rectTransform.localPosition = originalPosition;
-            canvasGroup.alpha = 1f;
-        }
-        
-        private IEnumerator AnimateFeedItemOut(CommunityFeedItem item)
-        {
-            if (item == null) yield break;
-            
-            var canvasGroup = item.GetComponent<CanvasGroup>();
-            if (canvasGroup == null)
-                canvasGroup = item.gameObject.AddComponent<CanvasGroup>();
-            
-            var rectTransform = item.GetComponent<RectTransform>();
-            Vector3 originalPosition = rectTransform.localPosition;
-            Vector3 endPosition = originalPosition + Vector3.left * 300f;
-            
-            float elapsed = 0f;
-            float duration = newItemAnimationDuration * 0.5f;
-            
-            while (elapsed < duration)
-            {
-                elapsed += Time.deltaTime;
-                float t = elapsed / duration;
-                float easedT = t * t;
-                
-                rectTransform.localPosition = Vector3.Lerp(originalPosition, endPosition, easedT);
-                canvasGroup.alpha = 1f - easedT;
-                
-                yield return null;
-            }
-            
-            ReturnFeedItemToPool(item);
-        }
-        
-        private void RefreshActiveFeedItems()
-        {
-            foreach (var item in activeFeedItems)
-            {
-                if (item != null)
-                {
-                    item.RefreshTimestamp();
-                }
+                Destroy(oldestItem.gameObject);
             }
         }
         
-        private void SwitchTab(bool showCommunityFeed)
+        private void SwitchToTab(bool showCommunity)
         {
-            showingCommunityFeed = showCommunityFeed;
+            showingCommunityFeed = showCommunity;
             
+            // Update tab button colors if you have them
             if (communityTabButton != null)
             {
-                communityTabButton.interactable = !showCommunityFeed;
+                var colors = communityTabButton.colors;
+                colors.normalColor = showCommunity ? Color.white : new Color(0.7f, 0.7f, 0.7f);
+                communityTabButton.colors = colors;
             }
             
             if (eventsTabButton != null)
             {
-                eventsTabButton.interactable = showCommunityFeed;
+                var colors = eventsTabButton.colors;
+                colors.normalColor = !showCommunity ? Color.white : new Color(0.7f, 0.7f, 0.7f);
+                eventsTabButton.colors = colors;
             }
             
-            if (showCommunityFeed)
+            // Show/hide panels if you have them
+            if (communityFeedPanel != null)
+                communityFeedPanel.SetActive(showCommunity);
+                
+            if (eventsPanel != null)
+                eventsPanel.SetActive(!showCommunity);
+            
+            // Load existing feedback when switching to community tab
+            if (showCommunity)
             {
-                ShowCommunityFeed();
-            }
-            else
-            {
-                ShowEventsView();
+                LoadExistingFeedback();
             }
         }
         
-        private void ShowCommunityFeed()
+        private void LoadExistingFeedback()
         {
-            ClearFeedDisplay();
+            // Clear current items
+            ClearFeedItems();
             
+            // Load from feedback manager if available
             var feedbackManager = Community.CommunityFeedbackManager.Instance;
             if (feedbackManager != null)
             {
-                var activeFeedback = feedbackManager.GetActiveFeedback();
+                var existingFeedback = feedbackManager.GetActiveFeedback();
                 
-                foreach (var feedback in activeFeedback.Take(maxVisibleItems))
+                foreach (var feedback in existingFeedback.Take(maxVisibleItems))
                 {
-                    DisplayFeedbackItem(feedback);
+                    AddFeedItem(feedback);
                 }
             }
         }
         
-        private void ShowEventsView()
-        {
-            ClearFeedDisplay();
-            DisplayActiveEvents();
-        }
-        
-        private void DisplayActiveEvents()
-        {
-            var mockEvents = new List<Community.CommunityFeedback>
-            {
-                new Community.CommunityFeedback
-                {
-                    author = "System",
-                    content = "🚨 Support exploit discovered - requires immediate response",
-                    sentiment = -0.8f,
-                    feedbackType = Community.FeedbackType.Bug,
-                    communitySegment = "System",
-                    timestamp = System.DateTime.Now.AddMinutes(-2)
-                }
-            };
-            
-            foreach (var eventItem in mockEvents)
-            {
-                DisplayFeedbackItem(eventItem);
-            }
-        }
-        
-        private void ClearFeedDisplay()
+        private void ClearFeedItems()
         {
             foreach (var item in activeFeedItems)
             {
-                ReturnFeedItemToPool(item);
+                if (item != null && item.gameObject != null)
+                {
+                    Destroy(item.gameObject);
+                }
             }
             activeFeedItems.Clear();
         }
@@ -368,10 +194,8 @@ namespace MetaBalance.UI
         private void UpdateSentimentDisplay(float sentiment)
         {
             if (sentimentSlider != null)
-            {
                 sentimentSlider.value = sentiment / 100f;
-            }
-            
+                
             if (sentimentText != null)
             {
                 sentimentText.text = $"{sentiment:F1}%";
@@ -383,74 +207,101 @@ namespace MetaBalance.UI
         {
             return sentiment switch
             {
-                >= 70f => positiveColor,
-                >= 40f => Color.Lerp(neutralColor, positiveColor, (sentiment - 40f) / 30f),
-                >= 30f => neutralColor,
-                _ => Color.Lerp(neutralColor, negativeColor, (30f - sentiment) / 30f)
+                >= 70f => new Color(0.2f, 0.8f, 0.2f),    // Green
+                >= 40f => Color.Lerp(Color.gray, new Color(0.2f, 0.8f, 0.2f), (sentiment - 40f) / 30f),
+                >= 30f => Color.gray,                      // Gray
+                _ => Color.Lerp(Color.gray, new Color(0.8f, 0.2f, 0.2f), (30f - sentiment) / 30f)   // Red
             };
         }
         
-        private void HighlightFeedForPhase()
+        // Test methods for debugging
+        [ContextMenu("🧪 Test Add Pro Player Feedback")]
+        public void TestAddProPlayerFeedback()
         {
-            StartCoroutine(PulseFeedContainer());
+            var testFeedback = new Community.CommunityFeedback
+            {
+                author = "TSM_Legend",
+                content = "Finally! Warrior feels balanced now 💪 These health changes improve competitive diversity",
+                sentiment = 0.8f,
+                feedbackType = Community.FeedbackType.ProPlayerOpinion,
+                communitySegment = "Pro Players",
+                timestamp = System.DateTime.Now,
+                upvotes = 45,
+                replies = 12
+            };
+            
+            AddFeedItem(testFeedback);
         }
         
-        private IEnumerator PulseFeedContainer()
+        [ContextMenu("🧪 Test Add Content Creator Feedback")]
+        public void TestAddContentCreatorFeedback()
         {
-            if (feedContainer == null) yield break;
-            
-            var canvasGroup = feedContainer.GetComponent<CanvasGroup>();
-            if (canvasGroup == null)
-                canvasGroup = feedContainer.gameObject.AddComponent<CanvasGroup>();
-            
-            for (int i = 0; i < 3; i++)
+            var testFeedback = new Community.CommunityFeedback
             {
-                float elapsed = 0f;
-                while (elapsed < 0.5f)
-                {
-                    elapsed += Time.deltaTime;
-                    canvasGroup.alpha = Mathf.Lerp(1f, 1.3f, elapsed / 0.5f);
-                    yield return null;
-                }
-                
-                elapsed = 0f;
-                while (elapsed < 0.5f)
-                {
-                    elapsed += Time.deltaTime;
-                    canvasGroup.alpha = Mathf.Lerp(1.3f, 1f, elapsed / 0.5f);
-                    yield return null;
-                }
-            }
+                author = "GameGuruYT",
+                content = "Support utility nerf feels too harsh 😔 Making a reaction video tonight!",
+                sentiment = -0.6f,
+                feedbackType = Community.FeedbackType.ContentCreator,
+                communitySegment = "Content Creators",
+                timestamp = System.DateTime.Now,
+                upvotes = 87,
+                replies = 34
+            };
             
-            canvasGroup.alpha = 1f;
+            AddFeedItem(testFeedback);
         }
         
-        public void ForceRefreshFeed()
+        [ContextMenu("🧪 Test Add Multiple Items")]
+        public void TestAddMultipleItems()
         {
-            if (showingCommunityFeed)
+            TestAddProPlayerFeedback();
+            
+            var casualFeedback = new Community.CommunityFeedback
             {
-                ShowCommunityFeed();
-            }
-            else
+                author = "CasualGamer42",
+                content = "I like these Warrior changes! More fun to play now 😊",
+                sentiment = 0.6f,
+                feedbackType = Community.FeedbackType.CasualPlayerFeedback,
+                communitySegment = "Casual Players",
+                timestamp = System.DateTime.Now,
+                upvotes = 8,
+                replies = 3
+            };
+            AddFeedItem(casualFeedback);
+            
+            TestAddContentCreatorFeedback();
+        }
+        
+        [ContextMenu("🧹 Clear All Feed Items")]
+        public void TestClearAllItems()
+        {
+            ClearFeedItems();
+        }
+        
+        [ContextMenu("📊 Debug: Show Feed Info")]
+        public void DebugShowFeedInfo()
+        {
+            Debug.Log("=== 📊 FEED DEBUG INFO ===");
+            Debug.Log($"Community Container: {communityFeedContainer?.name ?? "NULL"}");
+            Debug.Log($"Feed Item Prefab: {feedItemPrefab?.name ?? "NULL"}");
+            Debug.Log($"Active Feed Items: {activeFeedItems.Count}");
+            Debug.Log($"Max Visible Items: {maxVisibleItems}");
+            Debug.Log($"Showing Community Feed: {showingCommunityFeed}");
+            
+            if (communityFeedContainer != null)
             {
-                ShowEventsView();
+                Debug.Log($"Container Child Count: {communityFeedContainer.childCount}");
             }
         }
         
         private void OnDestroy()
         {
+            // Clean up subscriptions
             if (Community.CommunityFeedbackManager.Instance != null)
             {
                 Community.CommunityFeedbackManager.Instance.OnNewFeedbackAdded.RemoveListener(OnNewFeedbackReceived);
-                Community.CommunityFeedbackManager.Instance.OnCommunitySentimentChanged.RemoveListener(OnSentimentChanged);
+                Community.CommunityFeedbackManager.Instance.OnCommunitySentimentChanged.RemoveListener(UpdateSentimentDisplay);
             }
-            
-            if (Core.PhaseManager.Instance != null)
-            {
-                Core.PhaseManager.Instance.OnPhaseChanged.RemoveListener(OnPhaseChanged);
-            }
-            
-            StopAllCoroutines();
         }
     }
 }
