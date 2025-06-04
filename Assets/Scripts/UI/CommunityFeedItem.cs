@@ -5,8 +5,7 @@ using TMPro;
 namespace MetaBalance.UI
 {
     /// <summary>
-    /// Minimal Community Feed Item - ONLY updates text content and colors
-    /// Does NOT touch positioning, sizing, layout, backgrounds, or create any objects
+    /// Fixed Community Feed Item - Properly shows VIP badges for all non-casual segments
     /// </summary>
     public class CommunityFeedItem : MonoBehaviour
     {
@@ -28,6 +27,7 @@ namespace MetaBalance.UI
         [SerializeField] private Color contentCreatorColor = new Color(0.8f, 0.2f, 0.8f, 1f); // Purple
         [SerializeField] private Color competitiveColor = new Color(1f, 0.4f, 0.1f, 1f);     // Orange
         [SerializeField] private Color casualColor = new Color(0.6f, 0.8f, 1f, 1f);          // Light Blue
+        [SerializeField] private Color vipColor = new Color(0.9f, 0.1f, 0.9f, 1f);            // Bright Purple for VIP
         
         [Header("Colors for Sentiment")]
         [SerializeField] private Color positiveColor = new Color(0.2f, 0.8f, 0.2f, 1f);  // Green
@@ -46,7 +46,7 @@ namespace MetaBalance.UI
             UpdateBadgeIfExists();
             UpdateBorderIfExists();
             
-            Debug.Log($"✅ Updated text for: {feedback.author} ({feedback.communitySegment})");
+            Debug.Log($"✅ Updated text for: {feedback.author} ({feedback.communitySegment}) - Badge: {ShouldShowBadge()}");
         }
         
         private void UpdateTextContent()
@@ -74,7 +74,7 @@ namespace MetaBalance.UI
             {
                 if (currentFeedback.upvotes > 0)
                 {
-                    upvotesText.text = $"👍 {currentFeedback.upvotes}";
+                    upvotesText.text = $"▲ {currentFeedback.upvotes}"; // Use triangle instead of emoji
                 }
                 else
                 {
@@ -87,7 +87,7 @@ namespace MetaBalance.UI
             {
                 if (currentFeedback.replies > 0)
                 {
-                    repliesText.text = $"💬 {currentFeedback.replies}";
+                    repliesText.text = $"● {currentFeedback.replies}"; // Use bullet instead of emoji
                 }
                 else
                 {
@@ -116,12 +116,13 @@ namespace MetaBalance.UI
         
         private void UpdateBadgeIfExists()
         {
-            // Only if you have a badge assigned
+            // Show badge for everyone who should have one (using the improved logic)
             if (segmentBadge != null)
             {
-                // Show badge for everyone except casual players
-                bool shouldShow = currentFeedback.communitySegment != "Casual Players";
+                bool shouldShow = ShouldShowBadge();
                 segmentBadge.SetActive(shouldShow);
+                
+                Debug.Log($"🏷️ Badge for {currentFeedback.author} ({currentFeedback.communitySegment}): {(shouldShow ? "SHOW" : "HIDE")} - Badge Text: '{GetBadgeText()}'");
             }
             
             // Change badge background color if you have one
@@ -146,6 +147,23 @@ namespace MetaBalance.UI
             }
         }
         
+        /// <summary>
+        /// Determines if this user should show a badge
+        /// </summary>
+        private bool ShouldShowBadge()
+        {
+            return currentFeedback.communitySegment switch
+            {
+                "Pro Players" => true,
+                "Content Creators" => true,
+                "Competitive" => true,
+                "Casual Players" => true,   // Casual players DO get badges
+                null => false,              // No segment = no badge
+                "" => false,                // Empty segment = no badge
+                _ => true                   // Any other segment gets VIP badge
+            };
+        }
+        
         private string GetBadgeText()
         {
             return currentFeedback.communitySegment switch
@@ -153,7 +171,10 @@ namespace MetaBalance.UI
                 "Pro Players" => "Pro Player",
                 "Content Creators" => "Content Creator", 
                 "Competitive" => "Competitive",
-                _ => "VIP"
+                "Casual Players" => "Casual", // Casual players get "Casual" badge
+                null => "",
+                "" => "",
+                _ => "VIP" // Any unrecognized segment becomes VIP
             };
         }
         
@@ -165,7 +186,7 @@ namespace MetaBalance.UI
                 "Content Creators" => contentCreatorColor,
                 "Competitive" => competitiveColor,
                 "Casual Players" => casualColor,
-                _ => Color.white
+                _ => vipColor // VIP gets bright purple
             };
         }
         
@@ -226,7 +247,7 @@ namespace MetaBalance.UI
             SetupWithProPlayerSupport(testFeedback);
         }
         
-        [ContextMenu("🧪 Test Casual (No Badge)")]
+        [ContextMenu("🧪 Test Casual (With Badge)")]
         public void TestCasual()
         {
             var testFeedback = new Community.CommunityFeedback
@@ -240,6 +261,61 @@ namespace MetaBalance.UI
                 timestamp = System.DateTime.Now.AddMinutes(-9)
             };
             SetupWithProPlayerSupport(testFeedback);
+        }
+        
+        [ContextMenu("🧪 Test VIP (Custom Segment)")]
+        public void TestVIP()
+        {
+            var testFeedback = new Community.CommunityFeedback
+            {
+                author = "MysteriousBalanceGuru",
+                content = "These changes align perfectly with the meta predictions 🔮✨",
+                sentiment = 0.9f,
+                communitySegment = "Beta Tester", // Custom segment -> becomes VIP
+                upvotes = 156,
+                replies = 42,
+                timestamp = System.DateTime.Now.AddMinutes(-2)
+            };
+            SetupWithProPlayerSupport(testFeedback);
+        }
+        
+        [ContextMenu("🧪 Test Unknown Segment (Should show VIP)")]
+        public void TestUnknownSegment()
+        {
+            var testFeedback = new Community.CommunityFeedback
+            {
+                author = "SpecialUser123",
+                content = "Interesting balance philosophy behind these changes 🤔",
+                sentiment = 0.4f,
+                communitySegment = "Game Designer", // Unknown segment -> becomes VIP
+                upvotes = 78,
+                replies = 23,
+                timestamp = System.DateTime.Now.AddMinutes(-7)
+            };
+            SetupWithProPlayerSupport(testFeedback);
+        }
+        
+        [ContextMenu("🔍 Debug: Check Current Badge State")]
+        public void DebugCheckBadgeState()
+        {
+            if (currentFeedback == null)
+            {
+                Debug.Log("❌ No current feedback set");
+                return;
+            }
+            
+            Debug.Log("=== 🔍 BADGE DEBUG INFO ===");
+            Debug.Log($"Author: {currentFeedback.author}");
+            Debug.Log($"Segment: '{currentFeedback.communitySegment}'");
+            Debug.Log($"Should Show Badge: {ShouldShowBadge()}");
+            Debug.Log($"Badge Text: '{GetBadgeText()}'");
+            Debug.Log($"Badge Color: {GetSegmentColor()}");
+            Debug.Log($"Badge GameObject Active: {segmentBadge?.activeSelf ?? false}");
+            
+            if (segmentBadgeText != null)
+                Debug.Log($"Badge Text Component Text: '{segmentBadgeText.text}'");
+            else
+                Debug.Log("❌ Badge Text Component: NULL");
         }
     }
 }

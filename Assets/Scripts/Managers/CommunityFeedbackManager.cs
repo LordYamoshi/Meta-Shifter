@@ -1,4 +1,5 @@
 using UnityEngine;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine.Events;
@@ -6,7 +7,7 @@ using UnityEngine.Events;
 namespace MetaBalance.Community
 {
     /// <summary>
-    /// Main Community Feedback Manager using Strategy Pattern and Observer Pattern
+    /// Enhanced Community Feedback Manager with sequential feedback display during feedback phase only
     /// </summary>
     public class CommunityFeedbackManager : MonoBehaviour
     {
@@ -16,6 +17,14 @@ namespace MetaBalance.Community
         [SerializeField] private FeedbackGenerationSettings settings;
         [SerializeField] private List<FeedbackTemplate> feedbackTemplates;
         
+        [Header("Sequential Display Settings")]
+        [Range(0.5f, 5f)]
+        [SerializeField] private float delayBetweenFeedback = 1.5f;
+        [Range(1, 10)]
+        [SerializeField] private int maxFeedbackPerPhase = 6;
+        [Range(0f, 1f)]
+        [SerializeField] private float feedbackShowChance = 0.8f; // Probability of showing feedback
+        
         [Header("Community Segments")]
         [SerializeField] private List<CommunitySegmentData> communitySegments;
         
@@ -23,6 +32,8 @@ namespace MetaBalance.Community
         public UnityEvent<List<CommunityFeedback>> OnFeedbackGenerated;
         public UnityEvent<CommunityFeedback> OnNewFeedbackAdded;
         public UnityEvent<float> OnCommunitySentimentChanged;
+        public UnityEvent OnFeedbackSequenceStarted;
+        public UnityEvent OnFeedbackSequenceCompleted;
         
         // Strategy Pattern: Different feedback generation strategies
         private Dictionary<FeedbackType, IFeedbackStrategy> feedbackStrategies;
@@ -30,7 +41,13 @@ namespace MetaBalance.Community
         // Observer Pattern: Track changes that affect community sentiment
         private List<BalanceChange> recentChanges = new List<BalanceChange>();
         private Queue<CommunityFeedback> activeFeedback = new Queue<CommunityFeedback>();
+        private Queue<CommunityFeedback> pendingFeedback = new Queue<CommunityFeedback>();
         private float currentCommunitySentiment = 65f;
+        
+        // Sequential display control
+        private bool isDisplayingSequence = false;
+        private bool isFeedbackPhase = false;
+        private Coroutine currentSequenceCoroutine;
         
         private void Awake()
         {
@@ -61,7 +78,7 @@ namespace MetaBalance.Community
         {
             feedbackStrategies = new Dictionary<FeedbackType, IFeedbackStrategy>();
             
-            // Add strategies one by one to avoid overload resolution issues
+            // Add UTF-8 compatible strategies
             feedbackStrategies.Add(FeedbackType.BalanceReaction, new BalanceReactionStrategy());
             feedbackStrategies.Add(FeedbackType.PopularityShift, new PopularityShiftStrategy());
             feedbackStrategies.Add(FeedbackType.MetaAnalysis, new MetaAnalysisStrategy());
@@ -70,16 +87,11 @@ namespace MetaBalance.Community
             feedbackStrategies.Add(FeedbackType.ContentCreator, new ContentCreatorStrategy());
             feedbackStrategies.Add(FeedbackType.CompetitiveScene, new CompetitiveStrategy());
             
-            Debug.Log($"✅ Initialized {feedbackStrategies.Count} feedback strategies");
+            Debug.Log($"✅ Initialized {feedbackStrategies.Count} UTF-8 compatible feedback strategies");
         }
         
         private void SubscribeToEvents()
         {
-            if (Core.ImplementationManager.Instance != null)
-            {
-                Core.ImplementationManager.Instance.OnImplementationCompleted.AddListener(GenerateFeedbackForImplementedChanges);
-            }
-            
             if (Core.PhaseManager.Instance != null)
             {
                 Core.PhaseManager.Instance.OnPhaseChanged.AddListener(OnPhaseChanged);
@@ -94,16 +106,113 @@ namespace MetaBalance.Community
         
         private void OnPhaseChanged(Core.GamePhase newPhase)
         {
+            Debug.Log($"🎭 Phase changed to: {newPhase}");
+            
+            isFeedbackPhase = (newPhase == Core.GamePhase.Feedback);
+            
             if (newPhase == Core.GamePhase.Feedback)
             {
                 StartFeedbackPhase();
+            }
+            else
+            {
+                StopFeedbackSequence();
+                // DON'T clear feedback - let it accumulate throughout the game
             }
         }
         
         private void StartFeedbackPhase()
         {
-            Debug.Log("🎭 Starting Feedback Phase - Generating community reactions...");
-            Invoke(nameof(GenerateFeedbackForImplementedChanges), 0.5f);
+            Debug.Log("🎭 Starting Feedback Phase - Preparing community reactions...");
+            
+            // Generate all feedback first (but don't display yet)
+            GenerateFeedbackForImplementedChanges();
+            
+            // Start sequential display with a small delay
+            Invoke(nameof(StartSequentialFeedbackDisplay), 0.5f);
+        }
+        
+        private void StartSequentialFeedbackDisplay()
+        {
+            if (pendingFeedback.Count == 0)
+            {
+                Debug.Log("📭 No feedback to display");
+                return;
+            }
+            
+            Debug.Log($"🎬 Starting sequential feedback display: {pendingFeedback.Count} items queued");
+            
+            OnFeedbackSequenceStarted.Invoke();
+            
+            // Start the sequential display coroutine
+            if (currentSequenceCoroutine != null)
+            {
+                StopCoroutine(currentSequenceCoroutine);
+            }
+            
+            currentSequenceCoroutine = StartCoroutine(DisplayFeedbackSequentially());
+        }
+        
+        private IEnumerator DisplayFeedbackSequentially()
+        {
+            isDisplayingSequence = true;
+            
+            Debug.Log($"📺 Sequential display started - {pendingFeedback.Count} feedback items to show");
+            
+            int itemsShown = 0;
+            
+            while (pendingFeedback.Count > 0 && isFeedbackPhase && itemsShown < maxFeedbackPerPhase)
+            {
+                // Check if we should show this feedback (probability based)
+                if (Random.value > feedbackShowChance)
+                {
+                    Debug.Log("🎲 Skipping feedback item due to probability");
+                    pendingFeedback.Dequeue(); // Skip this one
+                    continue;
+                }
+                
+                var feedback = pendingFeedback.Dequeue();
+                
+                Debug.Log($"📝 Displaying feedback {itemsShown + 1}: {feedback.author} - '{feedback.content}'");
+                
+                // Add to active feedback and notify UI
+                activeFeedback.Enqueue(feedback);
+                OnNewFeedbackAdded.Invoke(feedback);
+                
+                itemsShown++;
+                
+                // Wait before showing next feedback
+                if (pendingFeedback.Count > 0) // Don't wait after the last item
+                {
+                    Debug.Log($"⏱️ Waiting {delayBetweenFeedback}s before next feedback...");
+                    yield return new WaitForSeconds(delayBetweenFeedback);
+                    
+                    // Check if we're still in feedback phase
+                    if (!isFeedbackPhase)
+                    {
+                        Debug.Log("🛑 Phase changed - stopping feedback sequence");
+                        break;
+                    }
+                }
+            }
+            
+            Debug.Log($"✅ Sequential feedback display completed. Shown: {itemsShown} items");
+            
+            isDisplayingSequence = false;
+            OnFeedbackSequenceCompleted.Invoke();
+        }
+        
+        private void StopFeedbackSequence()
+        {
+            if (currentSequenceCoroutine != null)
+            {
+                StopCoroutine(currentSequenceCoroutine);
+                currentSequenceCoroutine = null;
+            }
+            
+            isDisplayingSequence = false;
+            
+            Debug.Log("🛑 Feedback sequence stopped");
         }
         
         private void OnCharacterStatChanged(Characters.CharacterType character, Characters.CharacterStat stat, float newValue)
@@ -141,6 +250,14 @@ namespace MetaBalance.Community
             if (recentChanges.Count == 0)
             {
                 Debug.Log("No recent changes to generate feedback for");
+                
+                // Generate some organic feedback anyway
+                var organicFeedback = GenerateOrganicFeedback();
+                foreach (var feedback in organicFeedback)
+                {
+                    pendingFeedback.Enqueue(feedback);
+                }
+                
                 return;
             }
             
@@ -155,7 +272,6 @@ namespace MetaBalance.Community
                     if (feedback != null)
                     {
                         newFeedback.Add(feedback);
-                        activeFeedback.Enqueue(feedback);
                     }
                 }
             }
@@ -163,24 +279,27 @@ namespace MetaBalance.Community
             // Add some random organic feedback
             newFeedback.AddRange(GenerateOrganicFeedback());
             
-            // Limit active feedback to prevent UI overflow
-            while (activeFeedback.Count > settings.maxActiveFeedback)
+            // Shuffle and queue for sequential display
+            newFeedback = newFeedback.OrderBy(f => Random.value).ToList();
+            
+            foreach (var feedback in newFeedback)
             {
-                activeFeedback.Dequeue();
+                pendingFeedback.Enqueue(feedback);
+            }
+            
+            // Limit pending feedback to prevent overflow
+            while (pendingFeedback.Count > maxFeedbackPerPhase * 2)
+            {
+                pendingFeedback.Dequeue();
             }
             
             // Update community sentiment based on generated feedback
             UpdateCommunitySentimentFromFeedback(newFeedback);
             
-            // Notify UI systems
+            // Notify that feedback was generated (but not yet displayed)
             OnFeedbackGenerated.Invoke(newFeedback);
             
-            foreach (var feedback in newFeedback)
-            {
-                OnNewFeedbackAdded.Invoke(feedback);
-            }
-            
-            Debug.Log($"✅ Generated {newFeedback.Count} community feedback items");
+            Debug.Log($"✅ Generated and queued {newFeedback.Count} feedback items for sequential display");
         }
         
         private List<CommunityFeedback> GenerateOrganicFeedback()
@@ -220,12 +339,17 @@ namespace MetaBalance.Community
                 return feedbackTemplates[Random.Range(0, feedbackTemplates.Count)];
             }
             
-            // Default templates if none are assigned
+            // Default UTF-8 compatible templates if none are assigned
             var defaultTemplates = new[]
             {
-                new FeedbackTemplate("Great changes! The game feels more balanced now 👍", FeedbackType.BalanceReaction, 0.5f),
-                new FeedbackTemplate("Not sure about these changes... 🤔", FeedbackType.BalanceReaction, 0f),
-                new FeedbackTemplate("This completely ruins my favorite character 😢", FeedbackType.BalanceReaction, -0.7f)
+                new FeedbackTemplate("Great changes! The game feels more balanced now [GOOD]", FeedbackType.BalanceReaction, 0.5f),
+                new FeedbackTemplate("Not sure about these changes... [?]", FeedbackType.BalanceReaction, 0f),
+                new FeedbackTemplate("This completely ruins my favorite character [SAD]", FeedbackType.BalanceReaction, -0.7f),
+                new FeedbackTemplate("The meta is shifting in interesting ways [TARGET]", FeedbackType.MetaAnalysis, 0.2f),
+                new FeedbackTemplate("Finally some character diversity! [BALANCE]", FeedbackType.MetaAnalysis, 0.6f),
+                new FeedbackTemplate("Everyone's playing the same characters [DOWN]", FeedbackType.PopularityShift, -0.4f),
+                new FeedbackTemplate("Stream tonight: Testing the new changes live! [VIDEO]", FeedbackType.ContentCreator, 0.3f),
+                new FeedbackTemplate("These changes will shake up tournaments [TROPHY]", FeedbackType.CompetitiveScene, 0.4f)
             };
             
             return defaultTemplates[Random.Range(0, defaultTemplates.Length)];
@@ -322,9 +446,60 @@ namespace MetaBalance.Community
                 template = template.Replace("{VALUE}", change.newValue.ToString("F1"));
             }
             
-            template = template.Replace("{RANDOM_EMOJI}", GetRandomEmoji());
+            // Replace UTF-8 symbol placeholders
+            template = ReplaceUTF8Symbols(template);
             
             return template;
+        }
+        
+        /// <summary>
+        /// Replace symbol placeholders with UTF-8 compatible characters
+        /// </summary>
+        private string ReplaceUTF8Symbols(string text)
+        {
+            return text
+                // Positive symbols
+                .Replace("[GOOD]", "✓")
+                .Replace("[YES]", "✓")
+                .Replace("[FIX]", "✓")
+                .Replace("[THANKS]", "★")
+                .Replace("[STRONG]", "♦")
+                .Replace("[TROPHY]", "◆")
+                .Replace("[TARGET]", "●")
+                .Replace("[UP]", "↑")
+                .Replace("[HAPPY]", ":)")
+                .Replace("[BALANCE]", "⚖")
+                .Replace("[STAR]", "★")
+                
+                // Negative symbols
+                .Replace("[BROKEN]", "✗")
+                .Replace("[SAD]", ":(")
+                .Replace("[BAD]", "✗")
+                .Replace("[RIP]", "†")
+                .Replace("[ANGRY]", "►")
+                .Replace("[DOWN]", "↓")
+                .Replace("[DEAD]", "✗")
+                .Replace("[HARD]", "▲")
+                .Replace("[X]", "✗")
+                
+                // Neutral symbols
+                .Replace("[?]", "?")
+                .Replace("[CONFUSED]", "?")
+                .Replace("[CIRCLE]", "●")
+                .Replace("[CLOCK]", "○")
+                
+                // Content creator symbols
+                .Replace("[VIDEO]", "►")
+                .Replace("[BELL]", "♪")
+                .Replace("[LIST]", "■")
+                .Replace("[SMART]", "※")
+                
+                // Generic symbols
+                .Replace("[FIRE]", "▲")
+                .Replace("[CHECK]", "✓")
+                .Replace("[HEART]", "♥")
+                .Replace("[DIAMOND]", "◆")
+                .Replace("[SQUARE]", "■");
         }
         
         private string GetRandomEmoji()
@@ -363,21 +538,90 @@ namespace MetaBalance.Community
             return new List<BalanceChange>(recentChanges);
         }
         
+        public bool IsDisplayingSequence()
+        {
+            return isDisplayingSequence;
+        }
+        
+        public int GetPendingFeedbackCount()
+        {
+            return pendingFeedback.Count;
+        }
+        
+        // Manual controls for testing and debugging
+        public void ForceStartSequentialDisplay()
+        {
+            if (pendingFeedback.Count > 0)
+            {
+                StartSequentialFeedbackDisplay();
+            }
+        }
+        
+        public void ForceStopSequentialDisplay()
+        {
+            StopFeedbackSequence();
+        }
+        
         // Debug methods
-        [ContextMenu("Generate Test Feedback")]
+        [ContextMenu("🧪 Generate Test Feedback")]
         public void DebugGenerateTestFeedback()
         {
             GenerateFeedbackForImplementedChanges();
         }
         
-        [ContextMenu("Show Community State")]
+        [ContextMenu("🎬 Force Start Sequential Display")]
+        public void DebugForceStartSequence()
+        {
+            ForceStartSequentialDisplay();
+        }
+        
+        [ContextMenu("🛑 Force Stop Sequential Display")]
+        public void DebugForceStopSequence()
+        {
+            ForceStopSequentialDisplay();
+        }
+        
+        [ContextMenu("📊 Show Community State")]
         public void DebugShowCommunityState()
         {
-            Debug.Log("=== COMMUNITY STATE ===");
+            Debug.Log("=== 📊 COMMUNITY STATE ===");
+            Debug.Log($"Current Phase: {Core.PhaseManager.Instance?.GetCurrentPhase()}");
+            Debug.Log($"Is Feedback Phase: {isFeedbackPhase}");
+            Debug.Log($"Is Displaying Sequence: {isDisplayingSequence}");
             Debug.Log($"Current Sentiment: {currentCommunitySentiment:F1}%");
             Debug.Log($"Active Feedback Items: {activeFeedback.Count}");
+            Debug.Log($"Pending Feedback Items: {pendingFeedback.Count}");
             Debug.Log($"Recent Changes: {recentChanges.Count}");
             Debug.Log($"Community Segments: {communitySegments.Count}");
+            Debug.Log($"Delay Between Feedback: {delayBetweenFeedback}s");
+            Debug.Log($"Max Feedback Per Phase: {maxFeedbackPerPhase}");
+        }
+        
+        [ContextMenu("🎲 Add Test Feedback to Queue")]
+        public void DebugAddTestFeedbackToQueue()
+        {
+            var testFeedback = new CommunityFeedback
+            {
+                author = "TestUser123",
+                content = "This is a test feedback message for debugging 🧪",
+                sentiment = Random.Range(-1f, 1f),
+                feedbackType = FeedbackType.BalanceReaction,
+                communitySegment = "Casual Players",
+                timestamp = System.DateTime.Now,
+                upvotes = Random.Range(1, 30),
+                replies = Random.Range(0, 10)
+            };
+            
+            pendingFeedback.Enqueue(testFeedback);
+            Debug.Log($"✅ Added test feedback to queue. Queue size: {pendingFeedback.Count}");
+        }
+        
+        [ContextMenu("🧹 Clear All Feedback (Debug Only)")]
+        public void DebugClearAllQueues()
+        {
+            pendingFeedback.Clear();
+            activeFeedback.Clear();
+            Debug.Log("🧹 DEBUG: Cleared all feedback queues (this should not happen during normal gameplay)");
         }
     }
 }
