@@ -1,5 +1,4 @@
 using UnityEngine;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine.Events;
@@ -7,47 +6,66 @@ using UnityEngine.Events;
 namespace MetaBalance.Community
 {
     /// <summary>
-    /// Enhanced Community Feedback Manager with sequential feedback display during feedback phase only
+    /// COMPLETELY REWRITTEN Enhanced Community Feedback Manager
+    /// Features all 7 enhanced strategies with smart priority system, realistic engagement patterns,
+    /// context-aware reactions, and comprehensive feedback generation
     /// </summary>
     public class CommunityFeedbackManager : MonoBehaviour
     {
         public static CommunityFeedbackManager Instance { get; private set; }
         
-        [Header("Feedback Generation")]
+        [Header("Enhanced Feedback Generation")]
         [SerializeField] private FeedbackGenerationSettings settings;
-        [SerializeField] private List<FeedbackTemplate> feedbackTemplates;
+        [SerializeField] private List<FeedbackTemplate> legacyFeedbackTemplates; // For backward compatibility
         
-        [Header("Sequential Display Settings")]
-        [Range(0.5f, 5f)]
-        [SerializeField] private float delayBetweenFeedback = 1.5f;
-        [Range(1, 10)]
-        [SerializeField] private int maxFeedbackPerPhase = 6;
-        [Range(0f, 1f)]
-        [SerializeField] private float feedbackShowChance = 0.8f; // Probability of showing feedback
-        
-        [Header("Community Segments")]
+        [Header("Enhanced Community Segments")]
         [SerializeField] private List<CommunitySegmentData> communitySegments;
         
-        [Header("Events")]
+        [Header("Strategy Configuration")]
+        [Range(0f, 2f)]
+        [SerializeField] private float balanceReactionWeight = 1.5f;
+        [Range(0f, 2f)]
+        [SerializeField] private float proPlayerWeight = 0.8f;
+        [Range(0f, 2f)]
+        [SerializeField] private float contentCreatorWeight = 1.2f;
+        [Range(0f, 2f)]
+        [SerializeField] private float casualPlayerWeight = 1.0f;
+        [Range(0f, 2f)]
+        [SerializeField] private float popularityShiftWeight = 0.6f;
+        [Range(0f, 2f)]
+        [SerializeField] private float metaAnalysisWeight = 0.7f;
+        [Range(0f, 2f)]
+        [SerializeField] private float competitiveWeight = 1.1f;
+        
+        [Header("Enhanced Events")]
         public UnityEvent<List<CommunityFeedback>> OnFeedbackGenerated;
         public UnityEvent<CommunityFeedback> OnNewFeedbackAdded;
         public UnityEvent<float> OnCommunitySentimentChanged;
-        public UnityEvent OnFeedbackSequenceStarted;
-        public UnityEvent OnFeedbackSequenceCompleted;
+        public UnityEvent<string> OnStrategyActivated; // New: Track which strategies trigger
+        public UnityEvent<FeedbackEventData> OnViralFeedbackGenerated; // New: Track viral content
         
-        // Strategy Pattern: Different feedback generation strategies
+        // Enhanced Strategy Pattern: All 7 strategies with smart management
         private Dictionary<FeedbackType, IFeedbackStrategy> feedbackStrategies;
+        private Dictionary<FeedbackType, float> strategyWeights;
+        private Dictionary<FeedbackType, int> strategyUsageCount;
+        private Dictionary<FeedbackType, float> strategyLastUsed;
         
-        // Observer Pattern: Track changes that affect community sentiment
+        // Enhanced Observer Pattern: Comprehensive change tracking
         private List<BalanceChange> recentChanges = new List<BalanceChange>();
         private Queue<CommunityFeedback> activeFeedback = new Queue<CommunityFeedback>();
-        private Queue<CommunityFeedback> pendingFeedback = new Queue<CommunityFeedback>();
-        private float currentCommunitySentiment = 65f;
+        private List<CommunityFeedback> viralFeedback = new List<CommunityFeedback>();
         
-        // Sequential display control
-        private bool isDisplayingSequence = false;
-        private bool isFeedbackPhase = false;
-        private Coroutine currentSequenceCoroutine;
+        // Enhanced sentiment and meta tracking
+        private float currentCommunitySentiment = 65f;
+        private float sentimentTrend = 0f;
+        private int totalFeedbackGenerated = 0;
+        private float lastFeedbackGenerationTime = 0f;
+        
+        // Enhanced context awareness
+        private bool isRankedSeason = false;
+        private bool isTournamentSeason = false;
+        private int currentGameWeek = 1;
+        private float metaStabilityScore = 75f;
         
         private void Awake()
         {
@@ -58,343 +76,667 @@ namespace MetaBalance.Community
             }
             Instance = this;
             
-            InitializeFeedbackStrategies();
+            InitializeEnhancedFeedbackSystem();
         }
         
         private void Start()
         {
-            SubscribeToEvents();
-            InitializeCommunitySegments();
+            SubscribeToEnhancedEvents();
+            InitializeEnhancedCommunitySegments();
+            InitializeContextualData();
             
-            // Create default settings if missing
+            // Create enhanced settings if missing
             if (settings == null)
             {
                 settings = ScriptableObject.CreateInstance<FeedbackGenerationSettings>();
                 settings.InitializeDefaults();
+                Debug.Log("🔧 Created default FeedbackGenerationSettings");
+            }
+            
+            Debug.Log("🎉 Enhanced Community Feedback Manager fully initialized!");
+        }
+        
+        #region Enhanced Strategy System
+        
+        private void InitializeEnhancedFeedbackSystem()
+        {
+            feedbackStrategies = new Dictionary<FeedbackType, IFeedbackStrategy>();
+            strategyWeights = new Dictionary<FeedbackType, float>();
+            strategyUsageCount = new Dictionary<FeedbackType, int>();
+            strategyLastUsed = new Dictionary<FeedbackType, float>();
+            
+            try 
+            {
+                // Initialize all 7 enhanced strategies with error handling
+                InitializeStrategy(FeedbackType.BalanceReaction, new BalanceReactionStrategy(), balanceReactionWeight);
+                InitializeStrategy(FeedbackType.ProPlayerOpinion, new ProPlayerStrategy(), proPlayerWeight);
+                InitializeStrategy(FeedbackType.ContentCreator, new ContentCreatorStrategy(), contentCreatorWeight);
+                InitializeStrategy(FeedbackType.CasualPlayerFeedback, new CasualPlayerStrategy(), casualPlayerWeight);
+                InitializeStrategy(FeedbackType.PopularityShift, new PopularityShiftStrategy(), popularityShiftWeight);
+                InitializeStrategy(FeedbackType.MetaAnalysis, new MetaAnalysisStrategy(), metaAnalysisWeight);
+                InitializeStrategy(FeedbackType.CompetitiveScene, new CompetitiveStrategy(), competitiveWeight);
+                
+                Debug.Log($"🎯 Successfully initialized {feedbackStrategies.Count} enhanced feedback strategies!");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"❌ Critical error initializing enhanced feedback strategies: {e.Message}");
+                Debug.LogError($"Stack trace: {e.StackTrace}");
             }
         }
         
-        private void InitializeFeedbackStrategies()
+        private void InitializeStrategy(FeedbackType type, IFeedbackStrategy strategy, float weight)
         {
-            feedbackStrategies = new Dictionary<FeedbackType, IFeedbackStrategy>();
+            feedbackStrategies.Add(type, strategy);
+            strategyWeights.Add(type, weight);
+            strategyUsageCount.Add(type, 0);
+            strategyLastUsed.Add(type, 0f);
             
-            // Add UTF-8 compatible strategies
-            feedbackStrategies.Add(FeedbackType.BalanceReaction, new BalanceReactionStrategy());
-            feedbackStrategies.Add(FeedbackType.PopularityShift, new PopularityShiftStrategy());
-            feedbackStrategies.Add(FeedbackType.MetaAnalysis, new MetaAnalysisStrategy());
-            feedbackStrategies.Add(FeedbackType.ProPlayerOpinion, new ProPlayerStrategy());
-            feedbackStrategies.Add(FeedbackType.CasualPlayerFeedback, new CasualPlayerStrategy());
-            feedbackStrategies.Add(FeedbackType.ContentCreator, new ContentCreatorStrategy());
-            feedbackStrategies.Add(FeedbackType.CompetitiveScene, new CompetitiveStrategy());
-            
-            Debug.Log($"✅ Initialized {feedbackStrategies.Count} UTF-8 compatible feedback strategies");
+            Debug.Log($"✅ {type} strategy initialized with weight {weight:F1}");
         }
         
-        private void SubscribeToEvents()
+        #endregion
+        
+        #region Enhanced Event Subscription
+        
+        private void SubscribeToEnhancedEvents()
         {
+            // Core system events
+            if (Core.ImplementationManager.Instance != null)
+            {
+                Core.ImplementationManager.Instance.OnImplementationCompleted.AddListener(GenerateEnhancedFeedbackForImplementedChanges);
+                Debug.Log("📡 Subscribed to ImplementationManager events");
+            }
+            
             if (Core.PhaseManager.Instance != null)
             {
-                Core.PhaseManager.Instance.OnPhaseChanged.AddListener(OnPhaseChanged);
+                Core.PhaseManager.Instance.OnPhaseChanged.AddListener(OnEnhancedPhaseChanged);
+                Core.PhaseManager.Instance.OnWeekChanged.AddListener(OnEnhancedWeekChanged);
+                Debug.Log("📡 Subscribed to PhaseManager events");
             }
             
             if (Characters.CharacterManager.Instance != null)
             {
-                Characters.CharacterManager.Instance.OnStatChanged.AddListener(OnCharacterStatChanged);
-                Characters.CharacterManager.Instance.OnOverallBalanceChanged.AddListener(OnOverallBalanceChanged);
+                Characters.CharacterManager.Instance.OnStatChanged.AddListener(OnEnhancedCharacterStatChanged);
+                Characters.CharacterManager.Instance.OnOverallBalanceChanged.AddListener(OnEnhancedOverallBalanceChanged);
+                Debug.Log("📡 Subscribed to CharacterManager events");
             }
         }
         
-        private void OnPhaseChanged(Core.GamePhase newPhase)
+        #endregion
+        
+        #region Enhanced Event Handlers
+        
+        private void OnEnhancedPhaseChanged(Core.GamePhase newPhase)
         {
-            Debug.Log($"🎭 Phase changed to: {newPhase}");
-            
-            isFeedbackPhase = (newPhase == Core.GamePhase.Feedback);
+            Debug.Log($"🎭 Enhanced phase change: {newPhase}");
             
             if (newPhase == Core.GamePhase.Feedback)
             {
-                StartFeedbackPhase();
+                StartEnhancedFeedbackPhase();
             }
-            else
+            
+            // Update contextual data
+            UpdateSeasonalContext();
+        }
+        
+        private void StartEnhancedFeedbackPhase()
+        {
+            Debug.Log("🎭 Starting Enhanced Feedback Phase - Generating authentic community reactions...");
+            
+            // Delay feedback generation for realistic timing
+            float delay = Random.Range(settings.feedbackDelayMin, settings.feedbackDelayMax);
+            Invoke(nameof(GenerateEnhancedFeedbackForImplementedChanges), delay);
+        }
+        
+        private void OnEnhancedWeekChanged(int newWeek)
+        {
+            currentGameWeek = newWeek;
+            UpdateSeasonalContext();
+            
+            // Generate some organic weekly feedback
+            if (Random.Range(0f, 1f) < 0.3f) // 30% chance
             {
-                StopFeedbackSequence();
-                // DON'T clear feedback - let it accumulate throughout the game
+                GenerateOrganicWeeklyFeedback();
+            }
+            
+            Debug.Log($"📅 Week {newWeek} - Context updated");
+        }
+        
+        private void OnEnhancedCharacterStatChanged(Characters.CharacterType character, Characters.CharacterStat stat, float newValue)
+        {
+            var previousValue = GetPreviousStatValue(character, stat);
+            var change = new BalanceChange(character, stat, previousValue, newValue);
+            
+            recentChanges.Add(change);
+            
+            // Keep only recent changes (last 30 seconds of game time)
+            recentChanges.RemoveAll(c => Time.time - c.timestamp > 30f);
+            
+            Debug.Log($"📊 Enhanced stat change tracked: {character} {stat} {previousValue:F1} → {newValue:F1}");
+            
+            // Immediate feedback for significant changes
+            if (change.magnitude > 15f)
+            {
+                GenerateImmediateFeedback(change);
             }
         }
         
-        private void StartFeedbackPhase()
+        private void OnEnhancedOverallBalanceChanged(float newBalance)
         {
-            Debug.Log("🎭 Starting Feedback Phase - Preparing community reactions...");
+            float previousSentiment = currentCommunitySentiment;
+            float targetSentiment = CalculateEnhancedTargetSentiment(newBalance);
             
-            // Generate all feedback first (but don't display yet)
-            GenerateFeedbackForImplementedChanges();
+            // Smooth sentiment transition
+            currentCommunitySentiment = Mathf.Lerp(currentCommunitySentiment, targetSentiment, 0.25f);
+            sentimentTrend = currentCommunitySentiment - previousSentiment;
             
-            // Start sequential display with a small delay
-            Invoke(nameof(StartSequentialFeedbackDisplay), 0.5f);
+            // Update meta stability
+            metaStabilityScore = newBalance;
+            
+            OnCommunitySentimentChanged.Invoke(currentCommunitySentiment);
+            
+            Debug.Log($"💭 Enhanced sentiment update: {previousSentiment:F1}% → {currentCommunitySentiment:F1}% (trend: {sentimentTrend:+0.1;-0.1})");
         }
         
-        private void StartSequentialFeedbackDisplay()
+        #endregion
+        
+        #region Enhanced Feedback Generation
+        
+        public void GenerateEnhancedFeedbackForImplementedChanges()
         {
-            if (pendingFeedback.Count == 0)
+            Debug.Log("📝 Generating enhanced community feedback with advanced strategy system...");
+            
+            if (recentChanges.Count == 0)
             {
-                Debug.Log("📭 No feedback to display");
+                Debug.Log("ℹ️ No recent changes to generate feedback for");
+                GenerateOrganicBackgroundFeedback();
                 return;
             }
             
-            Debug.Log($"🎬 Starting sequential feedback display: {pendingFeedback.Count} items queued");
+            var newFeedback = new List<CommunityFeedback>();
+            lastFeedbackGenerationTime = Time.time;
             
-            OnFeedbackSequenceStarted.Invoke();
+            // ENHANCED: Smart strategy selection with priority system
+            var applicableStrategies = GetApplicableStrategiesWithPriority();
             
-            // Start the sequential display coroutine
-            if (currentSequenceCoroutine != null)
-            {
-                StopCoroutine(currentSequenceCoroutine);
-            }
+            Debug.Log($"🎯 Found {applicableStrategies.Count} applicable strategies for {recentChanges.Count} changes");
             
-            currentSequenceCoroutine = StartCoroutine(DisplayFeedbackSequentially());
+            // Generate feedback from prioritized strategies
+            newFeedback.AddRange(GenerateStrategicFeedback(applicableStrategies));
+            
+            // Add enhanced organic feedback
+            newFeedback.AddRange(GenerateEnhancedOrganicFeedback());
+            
+            // Process and finalize feedback
+            ProcessAndFinalizeFeedback(newFeedback);
+            
+            Debug.Log($"🎉 Generated {newFeedback.Count} enhanced feedback items using {applicableStrategies.Count} strategies");
         }
         
-        private IEnumerator DisplayFeedbackSequentially()
+        private List<(IFeedbackStrategy strategy, float priority, FeedbackType type)> GetApplicableStrategiesWithPriority()
         {
-            isDisplayingSequence = true;
+            var applicableStrategies = new List<(IFeedbackStrategy strategy, float priority, FeedbackType type)>();
             
-            Debug.Log($"📺 Sequential display started - {pendingFeedback.Count} feedback items to show");
-            
-            int itemsShown = 0;
-            
-            while (pendingFeedback.Count > 0 && isFeedbackPhase && itemsShown < maxFeedbackPerPhase)
+            foreach (var kvp in feedbackStrategies)
             {
-                // Check if we should show this feedback (probability based)
-                if (Random.value > feedbackShowChance)
+                var strategy = kvp.Value;
+                var type = kvp.Key;
+                
+                if (strategy.ShouldApply(recentChanges, currentCommunitySentiment))
                 {
-                    Debug.Log("🎲 Skipping feedback item due to probability");
-                    pendingFeedback.Dequeue(); // Skip this one
-                    continue;
-                }
-                
-                var feedback = pendingFeedback.Dequeue();
-                
-                Debug.Log($"📝 Displaying feedback {itemsShown + 1}: {feedback.author} - '{feedback.content}'");
-                
-                // Add to active feedback and notify UI
-                activeFeedback.Enqueue(feedback);
-                OnNewFeedbackAdded.Invoke(feedback);
-                
-                itemsShown++;
-                
-                // Wait before showing next feedback
-                if (pendingFeedback.Count > 0) // Don't wait after the last item
-                {
-                    Debug.Log($"⏱️ Waiting {delayBetweenFeedback}s before next feedback...");
-                    yield return new WaitForSeconds(delayBetweenFeedback);
+                    float basePriority = strategy.GetPriority(recentChanges, currentCommunitySentiment);
+                    float enhancedPriority = CalculateEnhancedPriority(type, basePriority);
                     
-                    // Check if we're still in feedback phase
-                    if (!isFeedbackPhase)
+                    applicableStrategies.Add((strategy, enhancedPriority, type));
+                    
+                    Debug.Log($"  {type}: Base Priority {basePriority:F2} → Enhanced Priority {enhancedPriority:F2}");
+                }
+            }
+            
+            return applicableStrategies.OrderByDescending(s => s.priority).ToList();
+        }
+        
+        private float CalculateEnhancedPriority(FeedbackType type, float basePriority)
+        {
+            float enhancedPriority = basePriority;
+            
+            // Apply strategy weights
+            enhancedPriority *= strategyWeights.GetValueOrDefault(type, 1f);
+            
+            // Reduce priority for recently used strategies (prevent spam)
+            float timeSinceLastUse = Time.time - strategyLastUsed.GetValueOrDefault(type, 0f);
+            if (timeSinceLastUse < 10f) // Within last 10 seconds
+            {
+                enhancedPriority *= 0.5f; // 50% reduction
+            }
+            
+            // Boost priority for underused strategies (encourage diversity)
+            int usageCount = strategyUsageCount.GetValueOrDefault(type, 0);
+            int averageUsage = totalFeedbackGenerated / feedbackStrategies.Count;
+            if (usageCount < averageUsage * 0.7f) // 30% below average
+            {
+                enhancedPriority *= 1.3f; // 30% boost
+            }
+            
+            // Context-based adjustments
+            enhancedPriority *= GetContextualPriorityMultiplier(type);
+            
+            return enhancedPriority;
+        }
+        
+        private float GetContextualPriorityMultiplier(FeedbackType type)
+        {
+            return type switch
+            {
+                FeedbackType.ProPlayerOpinion => isTournamentSeason ? 1.5f : 1f,
+                FeedbackType.CompetitiveScene => isRankedSeason ? 1.3f : 1f,
+                FeedbackType.ContentCreator => (metaStabilityScore < 50f) ? 1.4f : 1f, // More content during chaos
+                FeedbackType.CasualPlayerFeedback => (currentCommunitySentiment < 40f) ? 1.2f : 1f, // More vocal when unhappy
+                FeedbackType.PopularityShift => 1f, // Always context-independent
+                FeedbackType.MetaAnalysis => (recentChanges.Count >= 3) ? 1.3f : 1f, // More analysis during big changes
+                FeedbackType.BalanceReaction => 1f, // Always high priority
+                _ => 1f
+            };
+        }
+        
+        private List<CommunityFeedback> GenerateStrategicFeedback(List<(IFeedbackStrategy strategy, float priority, FeedbackType type)> applicableStrategies)
+        {
+            var strategicFeedback = new List<CommunityFeedback>();
+            int maxStrategicFeedback = settings?.feedbackPerImplementation ?? 6;
+            int strategicFeedbackCount = 0;
+            
+            foreach (var (strategy, priority, type) in applicableStrategies)
+            {
+                if (strategicFeedbackCount >= maxStrategicFeedback) break;
+                
+                // Probability based on enhanced priority
+                float activationChance = Mathf.Clamp01(priority);
+                if (Random.Range(0f, 1f) < activationChance)
+                {
+                    try
                     {
-                        Debug.Log("🛑 Phase changed - stopping feedback sequence");
-                        break;
+                        var feedback = strategy.GenerateFeedback(recentChanges, currentCommunitySentiment, communitySegments);
+                        if (feedback != null)
+                        {
+                            // Enhanced feedback processing
+                            EnhanceFeedbackData(feedback, type);
+                            strategicFeedback.Add(feedback);
+                            strategicFeedbackCount++;
+                            
+                            // Update strategy tracking
+                            strategyUsageCount[type]++;
+                            strategyLastUsed[type] = Time.time;
+                            totalFeedbackGenerated++;
+                            
+                            OnStrategyActivated.Invoke($"{type} strategy activated");
+                            
+                            Debug.Log($"✅ Generated {type} feedback: \"{feedback.author}\" - {feedback.content.Substring(0, Mathf.Min(50, feedback.content.Length))}...");
+                        }
+                    }
+                    catch (System.Exception e)
+                    {
+                        Debug.LogError($"❌ Error generating {type} feedback: {e.Message}");
                     }
                 }
             }
             
-            Debug.Log($"✅ Sequential feedback display completed. Shown: {itemsShown} items");
-            
-            isDisplayingSequence = false;
-            OnFeedbackSequenceCompleted.Invoke();
+            return strategicFeedback;
         }
         
-        private void StopFeedbackSequence()
+        private void EnhanceFeedbackData(CommunityFeedback feedback, FeedbackType type)
         {
-            if (currentSequenceCoroutine != null)
+            // Calculate impact score
+            feedback.impactScore = CalculateFeedbackImpact(feedback);
+            
+            // Check viral potential
+            feedback.isViralCandidate = IsViralCandidate(feedback);
+            
+            // Add contextual tags based on current game state
+            AddContextualMetadata(feedback, type);
+            
+            // Track viral feedback
+            if (feedback.isViralCandidate)
             {
-                StopCoroutine(currentSequenceCoroutine);
-                currentSequenceCoroutine = null;
+                viralFeedback.Add(feedback);
+                OnViralFeedbackGenerated.Invoke(new FeedbackEventData(feedback, "High engagement potential"));
+            }
+        }
+        
+        private float CalculateFeedbackImpact(CommunityFeedback feedback)
+        {
+            float baseImpact = Mathf.Abs(feedback.sentiment);
+            float engagementMultiplier = (feedback.upvotes + feedback.replies * 2) / 100f;
+            float segmentMultiplier = GetSegmentImpactMultiplier(feedback.communitySegment);
+            
+            return (baseImpact * segmentMultiplier) + engagementMultiplier;
+        }
+        
+        private bool IsViralCandidate(CommunityFeedback feedback)
+        {
+            return feedback.upvotes > 60 || 
+                   feedback.replies > 25 || 
+                   Mathf.Abs(feedback.sentiment) > 0.8f ||
+                   feedback.communitySegment == "Pro Players" ||
+                   feedback.communitySegment == "Content Creators";
+        }
+        
+        private float GetSegmentImpactMultiplier(string segment)
+        {
+            var segmentData = communitySegments.FirstOrDefault(s => s.segmentName == segment);
+            return segmentData?.influence ?? 1f;
+        }
+        
+        private void AddContextualMetadata(CommunityFeedback feedback, FeedbackType type)
+        {
+            // Add timing context
+            if (isTournamentSeason && type == FeedbackType.ProPlayerOpinion)
+            {
+                feedback.content += " (Tournament Season)";
             }
             
-            isDisplayingSequence = false;
+            if (isRankedSeason && type == FeedbackType.CompetitiveScene)
+            {
+                feedback.content += " (Ranked Season)";
+            }
             
-            Debug.Log("🛑 Feedback sequence stopped");
+            // Add meta context for analysis
+            if (type == FeedbackType.MetaAnalysis && metaStabilityScore < 40f)
+            {
+                feedback.content += " (Meta Instability Period)";
+            }
         }
         
-        private void OnCharacterStatChanged(Characters.CharacterType character, Characters.CharacterStat stat, float newValue)
+        #endregion
+        
+        #region Enhanced Organic Feedback
+        
+        private List<CommunityFeedback> GenerateEnhancedOrganicFeedback()
         {
-            var change = new BalanceChange(character, stat, GetPreviousValue(character, stat), newValue);
-            recentChanges.Add(change);
+            var organicFeedback = new List<CommunityFeedback>();
             
-            // Keep only recent changes (last 10 seconds)
-            recentChanges.RemoveAll(c => Time.time - c.timestamp > 10f);
+            float organicChance = settings?.organicFeedbackChance ?? 0.4f;
+            if (Random.Range(0f, 1f) > organicChance) return organicFeedback;
+            
+            int organicCount = Random.Range(1, 4);
+            
+            for (int i = 0; i < organicCount; i++)
+            {
+                var feedback = GenerateSingleOrganicFeedback();
+                if (feedback != null)
+                {
+                    organicFeedback.Add(feedback);
+                }
+            }
+            
+            Debug.Log($"🌱 Generated {organicFeedback.Count} organic feedback items");
+            return organicFeedback;
         }
         
-        private float GetPreviousValue(Characters.CharacterType character, Characters.CharacterStat stat)
+        private CommunityFeedback GenerateSingleOrganicFeedback()
         {
-            // Try to find the previous value from recent changes
+            var template = GetRandomOrganicTemplate();
+            var segment = GetRandomWeightedSegment();
+            
+            var feedback = new CommunityFeedback
+            {
+                author = GenerateContextualAuthorName(segment),
+                content = ProcessOrganicTemplate(template.content),
+                sentiment = CalculateOrganicSentiment(template.sentimentBias),
+                feedbackType = template.feedbackType,
+                communitySegment = segment.segmentName,
+                timestamp = System.DateTime.Now,
+                isOrganic = true,
+                upvotes = Random.Range(1, 20),
+                replies = Random.Range(0, 8)
+            };
+            
+            return feedback;
+        }
+        
+        private void GenerateOrganicBackgroundFeedback()
+        {
+            if (Random.Range(0f, 1f) < 0.2f) // 20% chance when no changes
+            {
+                var backgroundFeedback = GenerateEnhancedOrganicFeedback();
+                ProcessAndFinalizeFeedback(backgroundFeedback);
+                
+                Debug.Log($"🌟 Generated {backgroundFeedback.Count} background organic feedback");
+            }
+        }
+        
+        private void GenerateOrganicWeeklyFeedback()
+        {
+            var weeklyFeedback = new List<CommunityFeedback>();
+            
+            // Generate meta state commentary
+            var metaCommentary = GenerateMetaStateCommentary();
+            if (metaCommentary != null) weeklyFeedback.Add(metaCommentary);
+            
+            // Generate seasonal commentary
+            var seasonalCommentary = GenerateSeasonalCommentary();
+            if (seasonalCommentary != null) weeklyFeedback.Add(seasonalCommentary);
+            
+            ProcessAndFinalizeFeedback(weeklyFeedback);
+        }
+        
+        #endregion
+        
+        #region Enhanced Processing and Utilities
+        
+        private void ProcessAndFinalizeFeedback(List<CommunityFeedback> newFeedback)
+        {
+            if (newFeedback.Count == 0) return;
+            
+            // Add to active feedback queue
+            foreach (var feedback in newFeedback)
+            {
+                activeFeedback.Enqueue(feedback);
+            }
+            
+            // Maintain queue size
+            while (activeFeedback.Count > (settings?.maxActiveFeedback ?? 15))
+            {
+                activeFeedback.Dequeue();
+            }
+            
+            // Update community sentiment
+            UpdateEnhancedCommunitySentiment(newFeedback);
+            
+            // Notify UI systems
+            OnFeedbackGenerated.Invoke(newFeedback);
+            
+            foreach (var feedback in newFeedback)
+            {
+                OnNewFeedbackAdded.Invoke(feedback);
+            }
+            
+            // Clean up old changes
+            CleanupOldChanges();
+        }
+        
+        private void UpdateEnhancedCommunitySentiment(List<CommunityFeedback> feedback)
+        {
+            if (feedback.Count == 0) return;
+            
+            float weightedSentimentSum = 0f;
+            float totalWeight = 0f;
+            
+            foreach (var fb in feedback)
+            {
+                float segmentWeight = GetSegmentImpactMultiplier(fb.communitySegment);
+                float engagementWeight = (fb.upvotes + fb.replies) / 100f + 1f;
+                float weight = segmentWeight * engagementWeight;
+                
+                weightedSentimentSum += (fb.sentiment + 1f) * 50f * weight; // Convert to 0-100 scale
+                totalWeight += weight;
+            }
+            
+            if (totalWeight > 0f)
+            {
+                float averageSentiment = weightedSentimentSum / totalWeight;
+                float sentimentInfluence = Mathf.Clamp(feedback.Count * 0.08f, 0.05f, 0.3f);
+                
+                float previousSentiment = currentCommunitySentiment;
+                currentCommunitySentiment = Mathf.Lerp(currentCommunitySentiment, averageSentiment, sentimentInfluence);
+                currentCommunitySentiment = Mathf.Clamp(currentCommunitySentiment, 10f, 90f);
+                
+                sentimentTrend = currentCommunitySentiment - previousSentiment;
+                
+                OnCommunitySentimentChanged.Invoke(currentCommunitySentiment);
+                
+                Debug.Log($"💭 Enhanced sentiment update: {previousSentiment:F1}% → {currentCommunitySentiment:F1}% (trend: {sentimentTrend:+0.1;-0.1})");
+            }
+        }
+        
+        private void CleanupOldChanges()
+        {
+            recentChanges.RemoveAll(c => Time.time - c.timestamp > 45f);
+            
+            // Also cleanup old viral feedback
+            viralFeedback.RemoveAll(f => 
+                (System.DateTime.Now - f.timestamp).TotalMinutes > 30);
+        }
+        
+        #endregion
+        
+        #region Context and Utility Methods
+        
+        private void InitializeEnhancedCommunitySegments()
+        {
+            if (communitySegments == null || communitySegments.Count == 0)
+            {
+                communitySegments = new List<CommunitySegmentData>
+                {
+                    new CommunitySegmentData("Pro Players", 0.9f, 0.4f, 0.1f),        // Very high influence, low activity, slightly positive
+                    new CommunitySegmentData("Content Creators", 0.8f, 1.3f, 0.2f),  // High influence, high activity, positive
+                    new CommunitySegmentData("Competitive", 0.7f, 1.6f, -0.1f),      // Good influence, very active, slightly negative
+                    new CommunitySegmentData("Casual Players", 0.5f, 1.0f, 0.3f)     // Moderate influence, normal activity, positive
+                };
+                
+                Debug.Log($"✅ Initialized {communitySegments.Count} enhanced community segments");
+            }
+        }
+        
+        private void InitializeContextualData()
+        {
+            UpdateSeasonalContext();
+        }
+        
+        private void UpdateSeasonalContext()
+        {
+            // Simulate competitive seasons based on game week
+            int seasonCycle = currentGameWeek % 12; // 12-week cycles
+            
+            isRankedSeason = seasonCycle >= 2 && seasonCycle <= 9; // Weeks 2-9 are ranked season
+            isTournamentSeason = seasonCycle == 10 || seasonCycle == 11; // Weeks 10-11 are tournament season
+            
+            Debug.Log($"🏆 Context Update - Week {currentGameWeek}: Ranked={isRankedSeason}, Tournament={isTournamentSeason}");
+        }
+        
+        private float GetPreviousStatValue(Characters.CharacterType character, Characters.CharacterStat stat)
+        {
             var previousChange = recentChanges
                 .Where(c => c.character == character && c.stat == stat)
                 .OrderByDescending(c => c.timestamp)
                 .FirstOrDefault();
             
-            return previousChange?.newValue ?? 50f; // Default to 50 if no previous value
+            return previousChange?.previousValue ?? 50f;
         }
         
-        private void OnOverallBalanceChanged(float newBalance)
+        private float CalculateEnhancedTargetSentiment(float overallBalance)
         {
-            float targetSentiment = CalculateTargetSentiment(newBalance);
-            currentCommunitySentiment = Mathf.Lerp(currentCommunitySentiment, targetSentiment, 0.3f);
+            float baseSentiment = overallBalance switch
+            {
+                >= 85f => Random.Range(75f, 85f),   // High satisfaction
+                >= 70f => Random.Range(60f, 75f),   // Good satisfaction
+                >= 50f => Random.Range(45f, 65f),   // Mixed satisfaction
+                >= 30f => Random.Range(25f, 45f),   // Low satisfaction
+                _ => Random.Range(15f, 30f)         // Very low satisfaction
+            };
             
-            OnCommunitySentimentChanged.Invoke(currentCommunitySentiment);
+            // Apply contextual modifiers
+            if (isTournamentSeason) baseSentiment -= 5f; // Tension before tournaments
+            if (isRankedSeason && overallBalance < 60f) baseSentiment -= 8f; // Frustration during ranked with poor balance
+            
+            return Mathf.Clamp(baseSentiment, 15f, 85f);
         }
         
-        public void GenerateFeedbackForImplementedChanges()
+        private void GenerateImmediateFeedback(BalanceChange change)
         {
-            Debug.Log("📝 Generating community feedback for recent changes...");
+            // Generate immediate reaction for very significant changes
+            var immediateStrategies = feedbackStrategies.Values
+                .Where(s => s.ShouldApply(new List<BalanceChange> { change }, currentCommunitySentiment))
+                .Take(2); // Limit to 2 immediate reactions
             
-            if (recentChanges.Count == 0)
+            var immediateFeedback = new List<CommunityFeedback>();
+            
+            foreach (var strategy in immediateStrategies)
             {
-                Debug.Log("No recent changes to generate feedback for");
-                
-                // Generate some organic feedback anyway
-                var organicFeedback = GenerateOrganicFeedback();
-                foreach (var feedback in organicFeedback)
+                if (Random.Range(0f, 1f) < 0.6f) // 60% chance for immediate reaction
                 {
-                    pendingFeedback.Enqueue(feedback);
-                }
-                
-                return;
-            }
-            
-            var newFeedback = new List<CommunityFeedback>();
-            
-            // Use different strategies for different types of feedback
-            foreach (var strategy in feedbackStrategies.Values)
-            {
-                if (strategy.ShouldApply(recentChanges, currentCommunitySentiment))
-                {
-                    var feedback = strategy.GenerateFeedback(recentChanges, currentCommunitySentiment, communitySegments);
+                    var feedback = strategy.GenerateFeedback(new List<BalanceChange> { change }, currentCommunitySentiment, communitySegments);
                     if (feedback != null)
                     {
-                        newFeedback.Add(feedback);
+                        feedback.content = "🚨 IMMEDIATE: " + feedback.content; // Mark as immediate
+                        immediateFeedback.Add(feedback);
                     }
                 }
             }
             
-            // Add some random organic feedback
-            newFeedback.AddRange(GenerateOrganicFeedback());
-            
-            // Shuffle and queue for sequential display
-            newFeedback = newFeedback.OrderBy(f => Random.value).ToList();
-            
-            foreach (var feedback in newFeedback)
+            if (immediateFeedback.Count > 0)
             {
-                pendingFeedback.Enqueue(feedback);
+                ProcessAndFinalizeFeedback(immediateFeedback);
+                Debug.Log($"⚡ Generated {immediateFeedback.Count} immediate reactions to major {change.character} {change.stat} change");
             }
-            
-            // Limit pending feedback to prevent overflow
-            while (pendingFeedback.Count > maxFeedbackPerPhase * 2)
-            {
-                pendingFeedback.Dequeue();
-            }
-            
-            // Update community sentiment based on generated feedback
-            UpdateCommunitySentimentFromFeedback(newFeedback);
-            
-            // Notify that feedback was generated (but not yet displayed)
-            OnFeedbackGenerated.Invoke(newFeedback);
-            
-            Debug.Log($"✅ Generated and queued {newFeedback.Count} feedback items for sequential display");
         }
         
-        private List<CommunityFeedback> GenerateOrganicFeedback()
-        {
-            var organicFeedback = new List<CommunityFeedback>();
-            
-            int count = Random.Range(1, 4);
-            
-            for (int i = 0; i < count; i++)
-            {
-                var template = GetRandomTemplate();
-                var segment = GetRandomSegment();
-                
-                var feedback = new CommunityFeedback
-                {
-                    author = GenerateAuthorName(segment),
-                    content = ProcessTemplate(template.content, null),
-                    sentiment = Random.Range(-1f, 1f),
-                    feedbackType = template.feedbackType,
-                    communitySegment = segment.segmentName,
-                    timestamp = System.DateTime.Now,
-                    isOrganic = true,
-                    upvotes = Random.Range(1, 30),
-                    replies = Random.Range(0, 10)
-                };
-                
-                organicFeedback.Add(feedback);
-            }
-            
-            return organicFeedback;
-        }
+        #endregion
         
-        private FeedbackTemplate GetRandomTemplate()
+        #region Template and Generation Utilities
+        
+        private FeedbackTemplate GetRandomOrganicTemplate()
         {
-            if (feedbackTemplates != null && feedbackTemplates.Count > 0)
+            if (legacyFeedbackTemplates != null && legacyFeedbackTemplates.Count > 0)
             {
-                return feedbackTemplates[Random.Range(0, feedbackTemplates.Count)];
+                return legacyFeedbackTemplates[Random.Range(0, legacyFeedbackTemplates.Count)];
             }
             
-            // Default UTF-8 compatible templates if none are assigned
+            // Enhanced default templates with UTF-8 symbols
             var defaultTemplates = new[]
             {
-                new FeedbackTemplate("Great changes! The game feels more balanced now [GOOD]", FeedbackType.BalanceReaction, 0.5f),
-                new FeedbackTemplate("Not sure about these changes... [?]", FeedbackType.BalanceReaction, 0f),
-                new FeedbackTemplate("This completely ruins my favorite character [SAD]", FeedbackType.BalanceReaction, -0.7f),
-                new FeedbackTemplate("The meta is shifting in interesting ways [TARGET]", FeedbackType.MetaAnalysis, 0.2f),
-                new FeedbackTemplate("Finally some character diversity! [BALANCE]", FeedbackType.MetaAnalysis, 0.6f),
-                new FeedbackTemplate("Everyone's playing the same characters [DOWN]", FeedbackType.PopularityShift, -0.4f),
-                new FeedbackTemplate("Stream tonight: Testing the new changes live! [VIDEO]", FeedbackType.ContentCreator, 0.3f),
-                new FeedbackTemplate("These changes will shake up tournaments [TROPHY]", FeedbackType.CompetitiveScene, 0.4f)
+                new FeedbackTemplate("Great balance changes! The game feels more balanced now ✓", FeedbackType.BalanceReaction, 0.6f),
+                new FeedbackTemplate("Not sure about these changes... ● Need more time to judge", FeedbackType.BalanceReaction, 0f),
+                new FeedbackTemplate("This completely ruins my favorite character ↓", FeedbackType.BalanceReaction, -0.7f),
+                new FeedbackTemplate("Meta is evolving in interesting ways ►", FeedbackType.MetaAnalysis, 0.3f),
+                new FeedbackTemplate("Loving the current state of the game ♥", FeedbackType.CasualPlayerFeedback, 0.8f),
+                new FeedbackTemplate("Pick rates are shifting dramatically ▲", FeedbackType.PopularityShift, 0.2f)
             };
             
             return defaultTemplates[Random.Range(0, defaultTemplates.Length)];
         }
         
-        private CommunitySegmentData GetRandomSegment()
+        private CommunitySegmentData GetRandomWeightedSegment()
         {
-            if (communitySegments != null && communitySegments.Count > 0)
+            if (communitySegments.Count == 0) return new CommunitySegmentData("General", 0.5f);
+            
+            float totalWeight = communitySegments.Sum(s => s.influence * s.activityLevel);
+            float randomValue = Random.Range(0f, totalWeight);
+            float currentWeight = 0f;
+            
+            foreach (var segment in communitySegments)
             {
-                return communitySegments[Random.Range(0, communitySegments.Count)];
+                currentWeight += segment.influence * segment.activityLevel;
+                if (randomValue <= currentWeight)
+                {
+                    return segment;
+                }
             }
             
-            return new CommunitySegmentData("General", 0.5f);
+            return communitySegments[0];
         }
         
-        private float CalculateTargetSentiment(float overallBalance)
-        {
-            return overallBalance switch
-            {
-                >= 80f => Random.Range(70f, 90f),
-                >= 60f => Random.Range(50f, 75f),
-                >= 40f => Random.Range(30f, 55f),
-                >= 20f => Random.Range(15f, 40f),
-                _ => Random.Range(10f, 25f)
-            };
-        }
-        
-        private void UpdateCommunitySentimentFromFeedback(List<CommunityFeedback> feedback)
-        {
-            if (feedback.Count == 0) return;
-            
-            float averageSentiment = feedback.Average(f => f.sentiment);
-            float sentimentWeight = feedback.Count * 0.1f;
-            
-            currentCommunitySentiment = Mathf.Lerp(
-                currentCommunitySentiment, 
-                (averageSentiment + 1f) * 50f,
-                sentimentWeight
-            );
-            
-            currentCommunitySentiment = Mathf.Clamp(currentCommunitySentiment, 0f, 100f);
-            OnCommunitySentimentChanged.Invoke(currentCommunitySentiment);
-        }
-        
-        private string GenerateAuthorName(CommunitySegmentData segment)
+        private string GenerateContextualAuthorName(CommunitySegmentData segment)
         {
             return segment.segmentName switch
             {
@@ -406,222 +748,356 @@ namespace MetaBalance.Community
             };
         }
         
+        private string ProcessOrganicTemplate(string template)
+        {
+            // Replace any template variables with contextual information
+            return template
+                .Replace("{WEEK}", currentGameWeek.ToString())
+                .Replace("{SEASON}", GetCurrentSeasonName())
+                .Replace("{SENTIMENT}", GetSentimentDescription())
+                .Replace("{META_STATE}", GetMetaStateDescription());
+        }
+        
+        private float CalculateOrganicSentiment(float templateBias)
+        {
+            float baseSentiment = (currentCommunitySentiment - 50f) / 50f;
+            float organicSentiment = baseSentiment + templateBias;
+            organicSentiment += Random.Range(-0.3f, 0.3f); // Random variance
+            
+            return Mathf.Clamp(organicSentiment, -1f, 1f);
+        }
+        
+        private CommunityFeedback GenerateMetaStateCommentary()
+        {
+            if (Random.Range(0f, 1f) > 0.4f) return null; // 40% chance
+            
+            string content = metaStabilityScore switch
+            {
+                > 80f => "Meta feels really stable right now ⚖ Good balance across the board",
+                > 60f => "Current meta is in a decent place ● Some minor issues but overall good",
+                > 40f => "Meta is a bit chaotic lately ► Lots of changes happening",
+                > 20f => "Meta is pretty unstable right now ↓ Hope things improve soon",
+                _ => "Meta is completely broken ✗ Need major fixes ASAP"
+            };
+            
+            return new CommunityFeedback
+            {
+                author = "MetaObserver_Weekly",
+                content = content,
+                sentiment = (metaStabilityScore - 50f) / 50f,
+                feedbackType = FeedbackType.MetaAnalysis,
+                communitySegment = "Competitive",
+                timestamp = System.DateTime.Now,
+                isOrganic = true,
+                upvotes = Random.Range(5, 25),
+                replies = Random.Range(2, 12)
+            };
+        }
+        
+        private CommunityFeedback GenerateSeasonalCommentary()
+        {
+            if (!isRankedSeason && !isTournamentSeason) return null;
+            
+            string content = (isRankedSeason, isTournamentSeason) switch
+            {
+                (true, false) => "Ranked season is heating up! ▲ Time to climb the ladder",
+                (false, true) => "Tournament season excitement! ★ Who's ready for the championships?",
+                (true, true) => "Both ranked and tournament seasons! ♦ Intense competition ahead",
+                _ => null
+            };
+            
+            if (content == null) return null;
+            
+            return new CommunityFeedback
+            {
+                author = GetSeasonalCommentatorName(),
+                content = content,
+                sentiment = Random.Range(0.3f, 0.8f), // Generally positive about seasons
+                feedbackType = FeedbackType.CompetitiveScene,
+                communitySegment = isRankedSeason ? "Competitive" : "Pro Players",
+                timestamp = System.DateTime.Now,
+                isOrganic = true,
+                upvotes = Random.Range(10, 40),
+                replies = Random.Range(5, 20)
+            };
+        }
+        
+        #endregion
+        
+        #region Name Generation Utilities
+        
         private string GetProPlayerName()
         {
-            var teams = new[] { "FaZe", "TSM", "TL", "C9", "G2" };
-            var names = new[] { "ProGamer", "Ace", "Champion", "Legend", "Elite" };
+            var teams = new[] { "TSM", "FaZe", "C9", "TL", "G2", "Fnatic", "NRG", "100T" };
+            var names = new[] { "Legend", "Ace", "Champion", "Elite", "Master", "Pro", "King", "Alpha" };
             return $"{teams[Random.Range(0, teams.Length)]}_{names[Random.Range(0, names.Length)]}";
         }
         
         private string GetContentCreatorName()
         {
-            var names = new[] { "StreamMaster", "YouTubeGuru", "TwitchKing", "ContentQueen", "GameGuruYT" };
+            var names = new[] { "StreamMaster", "YouTubeGuru", "TwitchKing", "ContentQueen", "GameGuruYT", 
+                               "MetaMasterTV", "BalanceWatchYT", "ProGuideGamer", "TierListLord", "PatchNotesTV" };
             return names[Random.Range(0, names.Length)];
         }
         
         private string GetCompetitiveName()
         {
-            var names = new[] { "RankedClimber", "EsportsHopeful", "TryHardPlayer", "CompetitiveMind" };
+            var names = new[] { "RankedClimber", "EsportsHopeful", "TryHardPlayer", "CompetitiveMind", "LadderWarrior",
+                               "RankedGrinder", "ClimbingHard", "CompetitiveEdge", "SkillExpression", "RankedAce" };
             return names[Random.Range(0, names.Length)];
         }
         
         private string GetCasualName()
         {
-            var names = new[] { "CasualGamer42", "FunPlayer", "WeekendWarrior", "ChillGamer" };
+            var names = new[] { "CasualGamer42", "FunPlayer", "WeekendWarrior", "ChillGamer", "JustForFun",
+                               "RelaxedGamer", "FamilyPlayer", "EveningGamer", "SocialGamer", "FunSeeker" };
             return names[Random.Range(0, names.Length)];
         }
         
         private string GetGenericName()
         {
-            var names = new[] { "GameFan", "PlayerOne", "Community_Voice", "BalanceWatcher" };
+            var names = new[] { "GameFan", "PlayerOne", "Community_Voice", "BalanceWatcher", "MetaObserver",
+                               "GameLover", "BalanceFan", "MetaFollower", "CommunityMember", "GameTracker" };
             return names[Random.Range(0, names.Length)];
         }
         
-        private string ProcessTemplate(string template, BalanceChange change)
+        private string GetSeasonalCommentatorName()
         {
-            if (change != null)
+            return isTournamentSeason ? 
+                   $"Tournament_Hype_{Random.Range(1, 100)}" : 
+                   $"RankedSeason_Fan_{Random.Range(1, 100)}";
+        }
+        
+        private string GetCurrentSeasonName()
+        {
+            return (isRankedSeason, isTournamentSeason) switch
             {
-                template = template.Replace("{CHARACTER}", change.character.ToString());
-                template = template.Replace("{STAT}", change.stat.ToString());
-                template = template.Replace("{VALUE}", change.newValue.ToString("F1"));
-            }
+                (true, false) => "Ranked Season",
+                (false, true) => "Tournament Season", 
+                (true, true) => "Championship Period",
+                _ => "Off Season"
+            };
+        }
+        
+        private string GetSentimentDescription()
+        {
+            return currentCommunitySentiment switch
+            {
+                > 75f => "very positive",
+                > 60f => "positive",
+                > 40f => "mixed",
+                > 25f => "negative", 
+                _ => "very negative"
+            };
+        }
+        
+        private string GetMetaStateDescription()
+        {
+            return metaStabilityScore switch
+            {
+                > 80f => "very stable",
+                > 60f => "stable",
+                > 40f => "transitional",
+                > 20f => "unstable",
+                _ => "chaotic"
+            };
+        }
+        
+        #endregion
+        
+        #region Public API and Debug Methods
+        
+        // Enhanced public getters
+        public List<CommunityFeedback> GetActiveFeedback() => activeFeedback.ToList();
+        public List<CommunityFeedback> GetViralFeedback() => viralFeedback.ToList();
+        public float GetCommunitySentiment() => currentCommunitySentiment;
+        public float GetSentimentTrend() => sentimentTrend;
+        public List<BalanceChange> GetRecentChanges() => new List<BalanceChange>(recentChanges);
+        public Dictionary<FeedbackType, int> GetStrategyUsageStats() => new Dictionary<FeedbackType, int>(strategyUsageCount);
+        public bool IsRankedSeason() => isRankedSeason;
+        public bool IsTournamentSeason() => isTournamentSeason;
+        public float GetMetaStabilityScore() => metaStabilityScore;
+        
+        // Enhanced debug methods
+        [ContextMenu("🧪 Test All Enhanced Strategies")]
+        public void DebugTestAllEnhancedStrategies()
+        {
+            Debug.Log("=== 🧪 TESTING ALL ENHANCED STRATEGIES ===");
             
-            // Replace UTF-8 symbol placeholders
-            template = ReplaceUTF8Symbols(template);
-            
-            return template;
-        }
-        
-        /// <summary>
-        /// Replace symbol placeholders with UTF-8 compatible characters
-        /// </summary>
-        private string ReplaceUTF8Symbols(string text)
-        {
-            return text
-                // Positive symbols
-                .Replace("[GOOD]", "✓")
-                .Replace("[YES]", "✓")
-                .Replace("[FIX]", "✓")
-                .Replace("[THANKS]", "★")
-                .Replace("[STRONG]", "♦")
-                .Replace("[TROPHY]", "◆")
-                .Replace("[TARGET]", "●")
-                .Replace("[UP]", "↑")
-                .Replace("[HAPPY]", ":)")
-                .Replace("[BALANCE]", "⚖")
-                .Replace("[STAR]", "★")
-                
-                // Negative symbols
-                .Replace("[BROKEN]", "✗")
-                .Replace("[SAD]", ":(")
-                .Replace("[BAD]", "✗")
-                .Replace("[RIP]", "†")
-                .Replace("[ANGRY]", "►")
-                .Replace("[DOWN]", "↓")
-                .Replace("[DEAD]", "✗")
-                .Replace("[HARD]", "▲")
-                .Replace("[X]", "✗")
-                
-                // Neutral symbols
-                .Replace("[?]", "?")
-                .Replace("[CONFUSED]", "?")
-                .Replace("[CIRCLE]", "●")
-                .Replace("[CLOCK]", "○")
-                
-                // Content creator symbols
-                .Replace("[VIDEO]", "►")
-                .Replace("[BELL]", "♪")
-                .Replace("[LIST]", "■")
-                .Replace("[SMART]", "※")
-                
-                // Generic symbols
-                .Replace("[FIRE]", "▲")
-                .Replace("[CHECK]", "✓")
-                .Replace("[HEART]", "♥")
-                .Replace("[DIAMOND]", "◆")
-                .Replace("[SQUARE]", "■");
-        }
-        
-        private string GetRandomEmoji()
-        {
-            var emojis = new[] { "😊", "😢", "😠", "🎯", "⚖️", "🔥", "💯", "❌", "✅", "🤔" };
-            return emojis[Random.Range(0, emojis.Length)];
-        }
-        
-        private void InitializeCommunitySegments()
-        {
-            if (communitySegments == null || communitySegments.Count == 0)
+            // Create comprehensive test balance changes
+            var testChanges = new List<BalanceChange>
             {
-                communitySegments = new List<CommunitySegmentData>
-                {
-                    new CommunitySegmentData("Pro Players", 0.8f),
-                    new CommunitySegmentData("Content Creators", 0.7f),
-                    new CommunitySegmentData("Competitive", 0.6f),
-                    new CommunitySegmentData("Casual Players", 0.4f)
-                };
-            }
-        }
-        
-        // Public getters for UI systems
-        public List<CommunityFeedback> GetActiveFeedback()
-        {
-            return activeFeedback.ToList();
-        }
-        
-        public float GetCommunitySentiment()
-        {
-            return currentCommunitySentiment;
-        }
-        
-        public List<BalanceChange> GetRecentChanges()
-        {
-            return new List<BalanceChange>(recentChanges);
-        }
-        
-        public bool IsDisplayingSequence()
-        {
-            return isDisplayingSequence;
-        }
-        
-        public int GetPendingFeedbackCount()
-        {
-            return pendingFeedback.Count;
-        }
-        
-        // Manual controls for testing and debugging
-        public void ForceStartSequentialDisplay()
-        {
-            if (pendingFeedback.Count > 0)
-            {
-                StartSequentialFeedbackDisplay();
-            }
-        }
-        
-        public void ForceStopSequentialDisplay()
-        {
-            StopFeedbackSequence();
-        }
-        
-        // Debug methods
-        [ContextMenu("🧪 Generate Test Feedback")]
-        public void DebugGenerateTestFeedback()
-        {
-            GenerateFeedbackForImplementedChanges();
-        }
-        
-        [ContextMenu("🎬 Force Start Sequential Display")]
-        public void DebugForceStartSequence()
-        {
-            ForceStartSequentialDisplay();
-        }
-        
-        [ContextMenu("🛑 Force Stop Sequential Display")]
-        public void DebugForceStopSequence()
-        {
-            ForceStopSequentialDisplay();
-        }
-        
-        [ContextMenu("📊 Show Community State")]
-        public void DebugShowCommunityState()
-        {
-            Debug.Log("=== 📊 COMMUNITY STATE ===");
-            Debug.Log($"Current Phase: {Core.PhaseManager.Instance?.GetCurrentPhase()}");
-            Debug.Log($"Is Feedback Phase: {isFeedbackPhase}");
-            Debug.Log($"Is Displaying Sequence: {isDisplayingSequence}");
-            Debug.Log($"Current Sentiment: {currentCommunitySentiment:F1}%");
-            Debug.Log($"Active Feedback Items: {activeFeedback.Count}");
-            Debug.Log($"Pending Feedback Items: {pendingFeedback.Count}");
-            Debug.Log($"Recent Changes: {recentChanges.Count}");
-            Debug.Log($"Community Segments: {communitySegments.Count}");
-            Debug.Log($"Delay Between Feedback: {delayBetweenFeedback}s");
-            Debug.Log($"Max Feedback Per Phase: {maxFeedbackPerPhase}");
-        }
-        
-        [ContextMenu("🎲 Add Test Feedback to Queue")]
-        public void DebugAddTestFeedbackToQueue()
-        {
-            var testFeedback = new CommunityFeedback
-            {
-                author = "TestUser123",
-                content = "This is a test feedback message for debugging 🧪",
-                sentiment = Random.Range(-1f, 1f),
-                feedbackType = FeedbackType.BalanceReaction,
-                communitySegment = "Casual Players",
-                timestamp = System.DateTime.Now,
-                upvotes = Random.Range(1, 30),
-                replies = Random.Range(0, 10)
+                new BalanceChange(Characters.CharacterType.Warrior, Characters.CharacterStat.Health, 50f, 70f),
+                new BalanceChange(Characters.CharacterType.Mage, Characters.CharacterStat.Damage, 60f, 40f),
+                new BalanceChange(Characters.CharacterType.Support, Characters.CharacterStat.Popularity, 35f, 65f),
+                new BalanceChange(Characters.CharacterType.Tank, Characters.CharacterStat.WinRate, 48f, 52f)
             };
             
-            pendingFeedback.Enqueue(testFeedback);
-            Debug.Log($"✅ Added test feedback to queue. Queue size: {pendingFeedback.Count}");
+            recentChanges.AddRange(testChanges);
+            
+            foreach (var kvp in feedbackStrategies)
+            {
+                var strategy = kvp.Value;
+                var type = kvp.Key;
+                
+                try
+                {
+                    bool shouldApply = strategy.ShouldApply(testChanges, currentCommunitySentiment);
+                    float basePriority = strategy.GetPriority(testChanges, currentCommunitySentiment);
+                    float enhancedPriority = CalculateEnhancedPriority(type, basePriority);
+                    
+                    Debug.Log($"Strategy: {type}");
+                    Debug.Log($"  Should Apply: {shouldApply}");
+                    Debug.Log($"  Base Priority: {basePriority:F2}");
+                    Debug.Log($"  Enhanced Priority: {enhancedPriority:F2}");
+                    Debug.Log($"  Usage Count: {strategyUsageCount.GetValueOrDefault(type, 0)}");
+                    Debug.Log($"  Weight: {strategyWeights.GetValueOrDefault(type, 1f):F1}");
+                    
+                    if (shouldApply)
+                    {
+                        var feedback = strategy.GenerateFeedback(testChanges, currentCommunitySentiment, communitySegments);
+                        if (feedback != null)
+                        {
+                            Debug.Log($"  ✅ Generated: {feedback.author}");
+                            Debug.Log($"  Content: \"{feedback.content}\"");
+                            Debug.Log($"  Sentiment: {feedback.sentiment:F2}");
+                            Debug.Log($"  Engagement: {feedback.upvotes} upvotes, {feedback.replies} replies");
+                            Debug.Log($"  Impact Score: {CalculateFeedbackImpact(feedback):F2}");
+                            Debug.Log($"  Viral Candidate: {IsViralCandidate(feedback)}");
+                        }
+                        else
+                        {
+                            Debug.Log($"  ⚠️ Strategy returned null feedback");
+                        }
+                    }
+                    
+                    Debug.Log(""); // Empty line for readability
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogError($"❌ Error testing {type}: {e.Message}");
+                }
+            }
+            
+            // Clean up test data
+            recentChanges.RemoveAll(c => testChanges.Contains(c));
         }
         
-        [ContextMenu("🧹 Clear All Feedback (Debug Only)")]
-        public void DebugClearAllQueues()
+        [ContextMenu("📊 Show Enhanced Statistics")]
+        public void DebugShowEnhancedStatistics()
         {
-            pendingFeedback.Clear();
+            Debug.Log("=== 📊 ENHANCED COMMUNITY FEEDBACK STATISTICS ===");
+            Debug.Log($"Total Strategies: {feedbackStrategies.Count}");
+            Debug.Log($"Community Segments: {communitySegments.Count}");
+            Debug.Log($"Active Feedback Items: {activeFeedback.Count}");
+            Debug.Log($"Viral Feedback Items: {viralFeedback.Count}");
+            Debug.Log($"Current Sentiment: {currentCommunitySentiment:F1}% (trend: {sentimentTrend:+0.1;-0.1})");
+            Debug.Log($"Meta Stability: {metaStabilityScore:F1}%");
+            Debug.Log($"Recent Changes: {recentChanges.Count}");
+            Debug.Log($"Total Feedback Generated: {totalFeedbackGenerated}");
+            Debug.Log($"Current Week: {currentGameWeek}");
+            Debug.Log($"Season Context: Ranked={isRankedSeason}, Tournament={isTournamentSeason}");
+            
+            Debug.Log("\nStrategy Usage Statistics:");
+            foreach (var kvp in strategyUsageCount.OrderByDescending(s => s.Value))
+            {
+                var type = kvp.Key;
+                var count = kvp.Value;
+                var weight = strategyWeights.GetValueOrDefault(type, 1f);
+                var lastUsed = strategyLastUsed.GetValueOrDefault(type, 0f);
+                var timeSinceLast = Time.time - lastUsed;
+                
+                Debug.Log($"  {type}: {count} uses, weight {weight:F1}, last used {timeSinceLast:F1}s ago");
+            }
+            
+            Debug.Log("\nCommunity Segments:");
+            foreach (var segment in communitySegments)
+            {
+                Debug.Log($"  {segment.segmentName}: Influence {segment.influence:F1}, Activity {segment.activityLevel:F1}, Bias {segment.baseSentimentBias:+0.1;-0.1}");
+            }
+        }
+        
+        [ContextMenu("🔄 Generate Enhanced Feedback Now")]
+        public void DebugGenerateEnhancedFeedback()
+        {
+            Debug.Log("🔄 Manually triggering enhanced feedback generation...");
+            GenerateEnhancedFeedbackForImplementedChanges();
+        }
+        
+        [ContextMenu("🌟 Generate Viral Test Feedback")]
+        public void DebugGenerateViralFeedback()
+        {
+            Debug.Log("🌟 Generating test viral feedback...");
+            
+            var viralTestFeedback = new CommunityFeedback
+            {
+                author = "TSM_Legend",
+                content = "HUGE changes incoming! This patch will reshape the entire competitive scene ★",
+                sentiment = 0.9f,
+                feedbackType = FeedbackType.ProPlayerOpinion,
+                communitySegment = "Pro Players",
+                timestamp = System.DateTime.Now,
+                upvotes = 150,
+                replies = 45,
+                isOrganic = false,
+                isViralCandidate = true
+            };
+            
+            viralTestFeedback.impactScore = CalculateFeedbackImpact(viralTestFeedback);
+            viralFeedback.Add(viralTestFeedback);
+            
+            OnViralFeedbackGenerated.Invoke(new FeedbackEventData(viralTestFeedback, "Debug viral test"));
+            OnNewFeedbackAdded.Invoke(viralTestFeedback);
+            
+            Debug.Log($"✅ Generated viral test feedback with {viralTestFeedback.upvotes} upvotes and impact score {viralTestFeedback.impactScore:F2}");
+        }
+        
+        [ContextMenu("⚖️ Reset Enhanced System")]
+        public void DebugResetEnhancedSystem()
+        {
+            Debug.Log("⚖️ Resetting enhanced community feedback system...");
+            
+            recentChanges.Clear();
             activeFeedback.Clear();
-            Debug.Log("🧹 DEBUG: Cleared all feedback queues (this should not happen during normal gameplay)");
+            viralFeedback.Clear();
+            
+            foreach (var type in strategyUsageCount.Keys.ToList())
+            {
+                strategyUsageCount[type] = 0;
+                strategyLastUsed[type] = 0f;
+            }
+            
+            totalFeedbackGenerated = 0;
+            currentCommunitySentiment = 65f;
+            sentimentTrend = 0f;
+            metaStabilityScore = 75f;
+            
+            Debug.Log("✅ Enhanced system reset complete");
+        }
+        
+        #endregion
+        
+        private void OnDestroy()
+        {
+            // Clean up subscriptions
+            if (Core.ImplementationManager.Instance != null)
+            {
+                Core.ImplementationManager.Instance.OnImplementationCompleted.RemoveListener(GenerateEnhancedFeedbackForImplementedChanges);
+            }
+            
+            if (Core.PhaseManager.Instance != null)
+            {
+                Core.PhaseManager.Instance.OnPhaseChanged.RemoveListener(OnEnhancedPhaseChanged);
+                Core.PhaseManager.Instance.OnWeekChanged.RemoveListener(OnEnhancedWeekChanged);
+            }
+            
+            if (Characters.CharacterManager.Instance != null)
+            {
+                Characters.CharacterManager.Instance.OnStatChanged.RemoveListener(OnEnhancedCharacterStatChanged);
+                Characters.CharacterManager.Instance.OnOverallBalanceChanged.RemoveListener(OnEnhancedOverallBalanceChanged);
+            }
+            
+            Debug.Log("🎭 Enhanced Community Feedback Manager destroyed and cleaned up");
         }
     }
 }
