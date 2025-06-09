@@ -1,180 +1,103 @@
+// Assets/Scripts/UI/EventUIItem.cs
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
-using System.Collections.Generic;
+using System;
 
 namespace MetaBalance.UI
 {
-    public class EventItemUI : MonoBehaviour
+    public class EventUIItem : MonoBehaviour
     {
-        [Header("UI Components")]
+        [Header("UI References")]
         [SerializeField] private TextMeshProUGUI titleText;
-        [SerializeField] private TextMeshProUGUI descriptionText;
-        [SerializeField] private TextMeshProUGUI timerText;
+        [SerializeField] private TextMeshProUGUI severityText;
+        [SerializeField] private TextMeshProUGUI timeRemainingText;
         [SerializeField] private Image backgroundImage;
-        [SerializeField] private Transform responseButtonsContainer;
-        [SerializeField] private GameObject responseButtonPrefab;
+        [SerializeField] private Image severityIcon;
+        [SerializeField] private Button viewButton;
         
-        private Events.GameEvent currentEvent;
-        private List<Button> responseButtons = new List<Button>();
+        private Events.GameEvent gameEvent;
+        private System.Action onViewClicked;
         
-        public void Setup(Events.GameEvent gameEvent)
+        public void Setup(Events.GameEvent evt, System.Action onView)
         {
-            currentEvent = gameEvent;
+            gameEvent = evt;
+            onViewClicked = onView;
             
-            // Set basic info
+            if (viewButton != null)
+            {
+                viewButton.onClick.RemoveAllListeners();
+                viewButton.onClick.AddListener(() => onViewClicked?.Invoke());
+            }
+            
+            RefreshDisplay();
+        }
+        
+        public void RefreshDisplay()
+        {
+            if (gameEvent == null) return;
+            
             if (titleText != null)
-                titleText.text = $"{gameEvent.GetEventIcon()} {gameEvent.title}";
-                
-            if (descriptionText != null)
-                descriptionText.text = gameEvent.description;
+                titleText.text = gameEvent.eventTitle;
             
-            // Set background color
+            if (severityText != null)
+            {
+                severityText.text = $"{gameEvent.GetSeverityEmoji()} {gameEvent.severity}";
+                severityText.color = gameEvent.GetSeverityColor();
+            }
+            
+            if (timeRemainingText != null)
+                timeRemainingText.text = gameEvent.GetTimeRemaining();
+            
             if (backgroundImage != null)
-                backgroundImage.color = gameEvent.GetEventColor() * 0.3f; // Semi-transparent
-            
-            // Create response buttons
-            CreateResponseButtons();
-            
-            // Start timer updates
-            InvokeRepeating(nameof(UpdateTimer), 0f, 1f);
-        }
-        
-        private void CreateResponseButtons()
-        {
-            if (responseButtonsContainer == null) return;
-            
-            var responseManager = Events.EventResponseManager.Instance;
-            if (responseManager == null) return;
-            
-            var availableResponses = responseManager.GetAvailableResponses();
-            
-            foreach (var response in availableResponses)
             {
-                CreateResponseButton(response);
-            }
-        }
-        
-        private void CreateResponseButton(Events.EventResponseManager.ResponseData response)
-        {
-            GameObject buttonObj;
-            
-            if (responseButtonPrefab != null)
-            {
-                buttonObj = Instantiate(responseButtonPrefab, responseButtonsContainer);
-            }
-            else
-            {
-                // Create simple button if no prefab
-                buttonObj = new GameObject($"Response_{response.type}");
-                buttonObj.transform.SetParent(responseButtonsContainer, false);
-                buttonObj.AddComponent<Image>();
-                buttonObj.AddComponent<Button>();
+                backgroundImage.color = gameEvent.eventColor;
                 
-                var textObj = new GameObject("Text");
-                textObj.transform.SetParent(buttonObj.transform, false);
-                textObj.AddComponent<TextMeshProUGUI>();
+                // Add urgency effects
+                if (gameEvent.isUrgent)
+                {
+                    // Add pulsing effect for urgent events
+                    StartCoroutine(PulseBackground());
+                }
             }
             
-            var button = buttonObj.GetComponent<Button>();
-            var buttonImage = buttonObj.GetComponent<Image>();
-            var buttonText = buttonObj.GetComponentInChildren<TextMeshProUGUI>();
+            if (severityIcon != null)
+                severityIcon.color = gameEvent.GetSeverityColor();
+        }
+        
+        private System.Collections.IEnumerator PulseBackground()
+        {
+            if (backgroundImage == null) yield break;
             
-            // Setup button
-            if (button != null)
+            Color originalColor = backgroundImage.color;
+            Color pulseColor = new Color(originalColor.r, originalColor.g, originalColor.b, 0.3f);
+            
+            while (gameEvent != null && gameEvent.isUrgent && gameObject.activeInHierarchy)
             {
-                button.onClick.AddListener(() => OnResponseSelected(response.type));
-                responseButtons.Add(button);
-            }
-            
-            // Setup appearance
-            if (buttonImage != null)
-                buttonImage.color = response.buttonColor;
+                // Fade out
+                float elapsed = 0f;
+                float duration = 0.8f;
                 
-            if (buttonText != null)
-            {
-                string costText = "";
-                if (response.rpCost > 0 || response.cpCost > 0)
+                while (elapsed < duration)
                 {
-                    costText = $" ({response.rpCost} RP, {response.cpCost} CP)";
+                    elapsed += Time.deltaTime;
+                    float t = elapsed / duration;
+                    backgroundImage.color = Color.Lerp(originalColor, pulseColor, t);
+                    yield return null;
                 }
-                buttonText.text = response.name + costText;
-                buttonText.color = Color.white;
-            }
-            
-            // Check affordability
-            var responseManager = Events.EventResponseManager.Instance;
-            if (responseManager != null)
-            {
-                bool canAfford = responseManager.CanAffordResponse(response.type);
-                if (button != null)
-                    button.interactable = canAfford;
-                    
-                if (!canAfford && buttonImage != null)
-                    buttonImage.color = Color.gray;
-            }
-        }
-        
-        private void OnResponseSelected(Events.ResponseType responseType)
-        {
-            var responseManager = Events.EventResponseManager.Instance;
-            if (responseManager != null)
-            {
-                bool success = responseManager.ExecuteResponse(currentEvent, responseType);
-                if (success)
+                
+                // Fade in
+                elapsed = 0f;
+                while (elapsed < duration)
                 {
-                    // Disable all buttons after response
-                    foreach (var button in responseButtons)
-                    {
-                        if (button != null)
-                            button.interactable = false;
-                    }
-                    
-                    // Update timer text to show resolved
-                    if (timerText != null)
-                        timerText.text = "Resolved";
-                    
-                    // Auto-remove after delay
-                    Invoke(nameof(RemoveSelf), 2f);
+                    elapsed += Time.deltaTime;
+                    float t = elapsed / duration;
+                    backgroundImage.color = Color.Lerp(pulseColor, originalColor, t);
+                    yield return null;
                 }
             }
         }
         
-        private void UpdateTimer()
-        {
-            if (currentEvent == null || currentEvent.isResolved) return;
-            
-            if (timerText != null)
-            {
-                if (currentEvent.IsExpired())
-                {
-                    timerText.text = "Expired";
-                    timerText.color = Color.red;
-                    
-                    // Disable buttons if expired
-                    foreach (var button in responseButtons)
-                    {
-                        if (button != null)
-                            button.interactable = false;
-                    }
-                }
-                else
-                {
-                    timerText.text = $"Time: {currentEvent.GetTimeRemaining()}";
-                    timerText.color = Color.white;
-                }
-            }
-        }
-        
-        private void RemoveSelf()
-        {
-            CancelInvoke();
-            Destroy(gameObject);
-        }
-        
-        private void OnDestroy()
-        {
-            CancelInvoke();
-        }
+        public Events.GameEvent GetEvent() => gameEvent;
     }
 }
