@@ -1,4 +1,3 @@
-// Assets/Scripts/Managers/EventManager.cs
 using UnityEngine;
 using System.Collections.Generic;
 using System.Linq;
@@ -6,24 +5,62 @@ using UnityEngine.Events;
 
 namespace MetaBalance.Events
 {
+    /// <summary>
+    /// Complete Event Manager System - Integrates with your existing game systems
+    /// Uses Observer Pattern to respond to game state changes
+    /// Uses Strategy Pattern for different event triggering strategies
+    /// </summary>
     public class EventManager : MonoBehaviour
     {
         public static EventManager Instance { get; private set; }
-        
-        [Header("Event Configuration")]
-        [SerializeField] private List<GameEvent> availableEvents = new List<GameEvent>();
-        [SerializeField] private int maxActiveEvents = 3;
-        [SerializeField] private float eventTriggerChance = 0.3f;
-        
-        [Header("Events")]
-        public UnityEvent<GameEvent> OnEventTriggered;
-        public UnityEvent<GameEvent> OnEventResolved;
-        public UnityEvent<GameEvent, EventResponse> OnEventResponseChosen;
-        public UnityEvent<List<GameEvent>> OnActiveEventsChanged;
-        
-        private List<GameEvent> activeEvents = new List<GameEvent>();
-        private Dictionary<string, GameEvent> eventDatabase = new Dictionary<string, GameEvent>();
-        
+
+        [Header("Event Spawning")] [SerializeField]
+        private Transform eventUIContainer;
+
+        [SerializeField] private GameObject eventUIItemPrefab;
+        [SerializeField] private int maxSimultaneousEvents = 3;
+
+        [Header("Event Timing")] [Range(0f, 1f)] [SerializeField]
+        private float randomEventChance = 0.3f;
+
+        [Range(10f, 120f)] [SerializeField] private float minTimeBetweenEvents = 30f;
+        [Range(60f, 300f)] [SerializeField] private float maxTimeBetweenEvents = 180f;
+
+        [Header("Event Triggers")] [SerializeField]
+        private bool triggerOnLowSentiment = true;
+
+        [SerializeField] private bool triggerOnHighSentiment = true;
+        [SerializeField] private bool triggerOnMajorChanges = true;
+        [SerializeField] private bool triggerOnSeasonalEvents = true;
+
+        [Header("Trigger Thresholds")] [Range(0f, 50f)] [SerializeField]
+        private float lowSentimentThreshold = 30f;
+
+        [Range(50f, 100f)] [SerializeField] private float highSentimentThreshold = 75f;
+        [Range(5f, 30f)] [SerializeField] private float majorChangeThreshold = 15f;
+
+        [Header("Events")] public UnityEvent<EventData> OnEventTriggered;
+        public UnityEvent<EventData, EventResponseType> OnEventResolved;
+        public UnityEvent<EventData> OnEventExpired;
+        public UnityEvent<string> OnEventSystemMessage; // For debugging/logging
+
+        // Active event tracking
+        private List<EventUIItem> activeEvents = new List<EventUIItem>();
+        private Queue<EventData> eventQueue = new Queue<EventData>();
+        private float lastEventTime = 0f;
+        private float nextRandomEventTime = 0f;
+
+        // System integration
+        private Community.CommunityFeedbackManager feedbackManager;
+        private Characters.CharacterManager characterManager;
+        private Core.ResourceManager resourceManager;
+        private Core.PhaseManager phaseManager;
+
+        // Event generation state
+        private float lastCommunitySentiment = 50f;
+        private List<Community.BalanceChange> recentMajorChanges = new List<Community.BalanceChange>();
+        private int currentGameWeek = 1;
+
         private void Awake()
         {
             if (Instance != null && Instance != this)
@@ -31,624 +68,739 @@ namespace MetaBalance.Events
                 Destroy(gameObject);
                 return;
             }
+
             Instance = this;
-            
-            InitializeEventDatabase();
         }
-        
+
         private void Start()
         {
+            InitializeEventSystem();
             SubscribeToGameEvents();
-            CreateDefaultEvents();
+            ScheduleNextRandomEvent();
+
+            Debug.Log("🎭 Event Manager initialized and ready!");
         }
-        
-        private void InitializeEventDatabase()
+
+        private void Update()
         {
-            foreach (var gameEvent in availableEvents)
+            UpdateActiveEvents();
+            CheckForRandomEvents();
+            ProcessEventQueue();
+        }
+
+        #region Initialization
+
+        private void InitializeEventSystem()
+        {
+            // Auto-find UI container if not set
+            if (eventUIContainer == null)
             {
-                if (!string.IsNullOrEmpty(gameEvent.eventId))
+                var found = GameObject.Find("EventContainer");
+                if (found != null)
+                    eventUIContainer = found.transform;
+                else
+                    eventUIContainer = transform; // Use self as fallback
+            }
+
+            // Auto-find prefab if not set
+            if (eventUIItemPrefab == null)
+            {
+                eventUIItemPrefab = Resources.Load<GameObject>("EventUIItem");
+                if (eventUIItemPrefab == null)
                 {
-                    eventDatabase[gameEvent.eventId] = gameEvent;
+                    Debug.LogWarning("⚠️ EventUIItem prefab not found. Events will not display properly.");
                 }
             }
+
+            OnEventSystemMessage.Invoke("Event system initialized");
         }
-        
+
         private void SubscribeToGameEvents()
         {
-            if (Core.PhaseManager.Instance != null)
+            // Get references to other managers
+            feedbackManager = Community.CommunityFeedbackManager.Instance;
+            characterManager = Characters.CharacterManager.Instance;
+            resourceManager = Core.ResourceManager.Instance;
+            phaseManager = Core.PhaseManager.Instance;
+
+            // Subscribe to relevant events
+            if (feedbackManager != null)
             {
-                Core.PhaseManager.Instance.OnPhaseChanged.AddListener(OnPhaseChanged);
-                Core.PhaseManager.Instance.OnWeekChanged.AddListener(OnWeekChanged);
+                feedbackManager.OnCommunitySentimentChanged.AddListener(OnCommunitySentimentChanged);
+                Debug.Log("📡 Subscribed to community sentiment changes");
             }
-            
-            if (Characters.CharacterManager.Instance != null)
+
+            if (characterManager != null)
             {
-                Characters.CharacterManager.Instance.OnStatChanged.AddListener(OnCharacterStatChanged);
-                Characters.CharacterManager.Instance.OnOverallBalanceChanged.AddListener(OnBalanceChanged);
+                characterManager.OnStatChanged.AddListener(OnCharacterStatChanged);
+                Debug.Log("📡 Subscribed to character stat changes");
             }
-            
-            if (Community.CommunityFeedbackManager.Instance != null)
+
+            if (phaseManager != null)
             {
-                Community.CommunityFeedbackManager.Instance.OnCommunitySentimentChanged.AddListener(OnSentimentChanged);
-            }
-        }
-        
-        private void CreateDefaultEvents()
-        {
-            var defaultEvents = new List<GameEvent>
-            {
-                CreateCrisisEvent(),
-                CreateOpportunityEvent(),
-                CreateCommunityEvent(),
-                CreateCompetitiveEvent(),
-                CreateTechnicalEvent()
-            };
-            
-            foreach (var evt in defaultEvents)
-            {
-                eventDatabase[evt.eventId] = evt;
-                availableEvents.Add(evt);
+                phaseManager.OnWeekChanged.AddListener(OnWeekChanged);
+                phaseManager.OnPhaseChanged.AddListener(OnPhaseChanged);
+                Debug.Log("📡 Subscribed to phase and week changes");
             }
         }
-        
-        private GameEvent CreateCrisisEvent()
+
+        #endregion
+
+        #region Event Triggering Logic
+
+        private void OnCommunitySentimentChanged(float newSentiment)
         {
-            var crisisEvent = new GameEvent
+            float sentimentChange = Mathf.Abs(newSentiment - lastCommunitySentiment);
+            lastCommunitySentiment = newSentiment;
+
+            // Trigger crisis events for low sentiment
+            if (triggerOnLowSentiment && newSentiment < lowSentimentThreshold)
             {
-                eventId = "crisis_exploit_discovered",
-                eventTitle = "Game-Breaking Exploit Discovered",
-                eventDescription = "Players have found a way to stack Support abilities that makes them nearly invincible. The community is in uproar and demanding immediate action.",
-                eventType = EventType.Crisis,
-                severity = EventSeverity.Critical,
-                isUrgent = true,
-                duration = 2f,
-                turnsRemaining = 2,
-                eventColor = new Color(0.8f, 0.1f, 0.1f),
-                affectedCharacters = { "Support" }
-            };
-            
-            crisisEvent.availableResponses = new List<EventResponse>
-            {
-                new EventResponse
+                float crisisChance = (lowSentimentThreshold - newSentiment) / lowSentimentThreshold;
+                if (Random.Range(0f, 1f) < crisisChance * 0.4f) // Max 40% chance
                 {
-                    responseId = "emergency_fix",
-                    buttonText = "Emergency Hotfix",
-                    responseDescription = "Deploy immediate fix to prevent exploit abuse",
-                    responseType = ResponseType.Emergency,
-                    rpCost = 8,
-                    cpCost = 2,
-                    requiredCardTypes = { Cards.CardType.CrisisResponse },
-                    effects = new EventResponseEffects
-                    {
-                        satisfactionChange = 15f,
-                        successChance = 0.9f,
-                        successMessage = "Exploit fixed! Community appreciates quick response.",
-                        failureMessage = "Fix didn't work completely. Some issues remain."
-                    }
-                },
-                new EventResponse
-                {
-                    responseId = "comprehensive_fix", 
-                    buttonText = "Comprehensive Solution",
-                    responseDescription = "Take time to properly fix the root cause",
-                    responseType = ResponseType.Strategic,
-                    rpCost = 15,
-                    cpCost = 5,
-                    requiredCardTypes = { Cards.CardType.BalanceChange, Cards.CardType.CrisisResponse },
-                    effects = new EventResponseEffects
-                    {
-                        satisfactionChange = 25f,
-                        successChance = 0.95f,
-                        successMessage = "Perfect fix! No more exploits and community is thrilled.",
-                        failureMessage = "Fix mostly works but took too long."
-                    }
-                },
-                new EventResponse
-                {
-                    responseId = "ignore_crisis",
-                    buttonText = "Do Nothing",
-                    responseDescription = "Hope the problem resolves itself",
-                    responseType = ResponseType.Ignore,
-                    rpCost = 0,
-                    cpCost = 0,
-                    effects = new EventResponseEffects
-                    {
-                        satisfactionChange = -30f,
-                        successChance = 0.1f,
-                        successMessage = "Somehow the community forgot about it.",
-                        failureMessage = "Community outrage continues to grow."
-                    }
-                }
-            };
-            
-            return crisisEvent;
-        }
-        
-        private GameEvent CreateOpportunityEvent()
-        {
-            var opportunityEvent = new GameEvent
-            {
-                eventId = "tournament_announced",
-                eventTitle = "Major Tournament Announced",
-                eventDescription = "A large esports organization just announced a major tournament for your game. This is a chance to boost competitive engagement.",
-                eventType = EventType.Opportunity,
-                severity = EventSeverity.Medium,
-                duration = 3f,
-                turnsRemaining = 3,
-                eventColor = new Color(0.2f, 0.8f, 0.2f)
-            };
-            
-            opportunityEvent.availableResponses = new List<EventResponse>
-            {
-                new EventResponse
-                {
-                    responseId = "sponsor_tournament",
-                    buttonText = "Official Sponsorship",
-                    responseDescription = "Provide official support and prize pool",
-                    responseType = ResponseType.Strategic,
-                    rpCost = 5,
-                    cpCost = 10,
-                    effects = new EventResponseEffects
-                    {
-                        satisfactionChange = 20f,
-                        rpReward = 2,
-                        successMessage = "Tournament is a huge success! Great publicity.",
-                        successChance = 0.8f
-                    }
-                },
-                new EventResponse
-                {
-                    responseId = "balance_for_tournament",
-                    buttonText = "Tournament Balance Patch",
-                    responseDescription = "Create special balance for competitive play",
-                    responseType = ResponseType.Technical,
-                    rpCost = 12,
-                    cpCost = 3,
-                    requiredCardTypes = { Cards.CardType.MetaShift },
-                    effects = new EventResponseEffects
-                    {
-                        satisfactionChange = 15f,
-                        successMessage = "Perfect competitive balance achieved!",
-                        successChance = 0.7f
-                    }
-                }
-            };
-            
-            return opportunityEvent;
-        }
-        
-        private GameEvent CreateCommunityEvent()
-        {
-            var communityEvent = new GameEvent
-            {
-                eventId = "viral_meme_trend",
-                eventTitle = "Viral Meme About Balance",
-                eventDescription = "A meme about game balance has gone viral on social media. Community engagement is through the roof!",
-                eventType = EventType.Community,
-                severity = EventSeverity.Low,
-                duration = 2f,
-                turnsRemaining = 2,
-                eventColor = new Color(0.8f, 0.2f, 0.8f)
-            };
-            
-            communityEvent.availableResponses = new List<EventResponse>
-            {
-                new EventResponse
-                {
-                    responseId = "embrace_meme",
-                    buttonText = "Embrace the Meme",
-                    responseDescription = "Post official response embracing the community humor",
-                    responseType = ResponseType.Community,
-                    cpCost = 3,
-                    requiredCardTypes = { Cards.CardType.Community },
-                    effects = new EventResponseEffects
-                    {
-                        satisfactionChange = 10f,
-                        cpReward = 5,
-                        successMessage = "Community loves your sense of humor!",
-                        successChance = 0.85f
-                    }
-                },
-                new EventResponse
-                {
-                    responseId = "professional_response",
-                    buttonText = "Professional Statement", 
-                    responseDescription = "Issue formal statement about balance philosophy",
-                    responseType = ResponseType.Community,
-                    cpCost = 5,
-                    effects = new EventResponseEffects
-                    {
-                        satisfactionChange = 5f,
-                        successMessage = "Maintains professional image.",
-                        successChance = 0.9f
-                    }
-                }
-            };
-            
-            return communityEvent;
-        }
-        
-        private GameEvent CreateCompetitiveEvent()
-        {
-            var competitiveEvent = new GameEvent
-            {
-                eventId = "pro_player_complaint",
-                eventTitle = "Pro Player Criticism",
-                eventDescription = "A popular professional player has publicly criticized recent balance changes on stream.",
-                eventType = EventType.Competitive,
-                severity = EventSeverity.High,
-                duration = 2f,
-                turnsRemaining = 2,
-                eventColor = new Color(1f, 0.8f, 0.2f)
-            };
-            
-            competitiveEvent.availableResponses = new List<EventResponse>
-            {
-                new EventResponse
-                {
-                    responseId = "direct_communication",
-                    buttonText = "Direct Discussion",
-                    responseDescription = "Reach out directly to address concerns",
-                    responseType = ResponseType.Community,
-                    cpCost = 8,
-                    effects = new EventResponseEffects
-                    {
-                        satisfactionChange = 12f,
-                        successMessage = "Pro player appreciates direct communication.",
-                        successChance = 0.75f
-                    }
-                },
-                new EventResponse
-                {
-                    responseId = "balance_adjustment",
-                    buttonText = "Address Concerns",
-                    responseDescription = "Make targeted changes based on feedback",
-                    responseType = ResponseType.Strategic,
-                    rpCost = 10,
-                    cpCost = 2,
-                    requiredCardTypes = { Cards.CardType.BalanceChange },
-                    effects = new EventResponseEffects
-                    {
-                        satisfactionChange = 18f,
-                        successMessage = "Changes address pro concerns perfectly!",
-                        successChance = 0.8f
-                    }
-                }
-            };
-            
-            return competitiveEvent;
-        }
-        
-        private GameEvent CreateTechnicalEvent()
-        {
-            var technicalEvent = new GameEvent
-            {
-                eventId = "server_maintenance",
-                eventTitle = "Scheduled Maintenance",
-                eventDescription = "Servers need maintenance to improve performance and stability.",
-                eventType = EventType.Technical,
-                severity = EventSeverity.Low,
-                duration = 1f,
-                turnsRemaining = 1,
-                eventColor = new Color(0.4f, 0.6f, 0.8f)
-            };
-            
-            technicalEvent.availableResponses = new List<EventResponse>
-            {
-                new EventResponse
-                {
-                    responseId = "announce_maintenance",
-                    buttonText = "Announce Maintenance",
-                    responseDescription = "Properly communicate maintenance schedule",
-                    responseType = ResponseType.Community,
-                    cpCost = 2,
-                    effects = new EventResponseEffects
-                    {
-                        satisfactionChange = 5f,
-                        successMessage = "Community appreciates clear communication.",
-                        successChance = 0.95f
-                    }
-                },
-                new EventResponse
-                {
-                    responseId = "extend_maintenance", 
-                    buttonText = "Extended Maintenance",
-                    responseDescription = "Use extra time to implement improvements",
-                    responseType = ResponseType.Technical,
-                    rpCost = 3,
-                    cpCost = 1,
-                    effects = new EventResponseEffects
-                    {
-                        satisfactionChange = 8f,
-                        successMessage = "Major improvements implemented!",
-                        successChance = 0.7f
-                    }
-                }
-            };
-            
-            return technicalEvent;
-        }
-        
-        public void TriggerRandomEvent()
-        {
-            if (activeEvents.Count >= maxActiveEvents) return;
-            if (Random.Range(0f, 1f) > eventTriggerChance) return;
-            
-            var availableEventPool = availableEvents.Where(e => !activeEvents.Contains(e) && 
-                CanTriggerEvent(e)).ToList();
-            
-            if (availableEventPool.Count == 0) return;
-            
-            var selectedEvent = availableEventPool[Random.Range(0, availableEventPool.Count)];
-            TriggerEvent(selectedEvent);
-        }
-        
-        public void TriggerEvent(GameEvent gameEvent)
-        {
-            if (gameEvent == null) return;
-            
-            // Create a copy to avoid modifying the original
-            var eventCopy = JsonUtility.FromJson<GameEvent>(JsonUtility.ToJson(gameEvent));
-            eventCopy.timestamp = System.DateTime.Now;
-            eventCopy.isActive = true;
-            eventCopy.turnsRemaining = Mathf.RoundToInt(eventCopy.duration);
-            
-            activeEvents.Add(eventCopy);
-            OnEventTriggered.Invoke(eventCopy);
-            OnActiveEventsChanged.Invoke(new List<GameEvent>(activeEvents));
-            
-            Debug.Log($"🎯 Event triggered: {eventCopy.eventTitle}");
-        }
-        
-        public void RespondToEvent(GameEvent gameEvent, EventResponse response)
-        {
-            if (!activeEvents.Contains(gameEvent)) return;
-            if (!response.IsCurrentlyAvailable()) return;
-            
-            // Spend resources
-            if (response.rpCost > 0 || response.cpCost > 0)
-            {
-                var resourceManager = Core.ResourceManager.Instance;
-                if (resourceManager != null)
-                {
-                    resourceManager.SpendResources(response.rpCost, response.cpCost);
+                    TriggerCommunityMoodEvent(newSentiment);
                 }
             }
-            
-            // Apply effects
-            ApplyResponseEffects(gameEvent, response);
-            
-            // Remove event
-            activeEvents.Remove(gameEvent);
-            gameEvent.isActive = false;
-            
-            OnEventResponseChosen.Invoke(gameEvent, response);
-            OnEventResolved.Invoke(gameEvent);
-            OnActiveEventsChanged.Invoke(new List<GameEvent>(activeEvents));
-            
-            Debug.Log($"✅ Event resolved: {gameEvent.eventTitle} with response: {response.buttonText}");
-        }
-        
-        private void ApplyResponseEffects(GameEvent gameEvent, EventResponse response)
-        {
-            var effects = response.effects;
-            bool success = Random.Range(0f, 1f) < effects.successChance;
-            
-            // Apply satisfaction change
-            if (effects.satisfactionChange != 0f)
+
+            // Trigger opportunity events for high sentiment
+            if (triggerOnHighSentiment && newSentiment > highSentimentThreshold)
             {
-                var characterManager = Characters.CharacterManager.Instance;
-                if (characterManager != null)
+                float opportunityChance = (newSentiment - highSentimentThreshold) / (100f - highSentimentThreshold);
+                if (Random.Range(0f, 1f) < opportunityChance * 0.3f) // Max 30% chance
                 {
-                    // This would need to be implemented in CharacterManager
-                    Debug.Log($"Satisfaction change: {effects.satisfactionChange}");
+                    TriggerOpportunityEvent(newSentiment);
                 }
             }
-            
-            // Apply resource rewards
-            if (effects.rpReward > 0 || effects.cpReward > 0)
-            {
-                var resourceManager = Core.ResourceManager.Instance;
-                if (resourceManager != null)
-                {
-                    resourceManager.AddResources(effects.rpReward, effects.cpReward);
-                }
-            }
-            
-            // Apply character effects
-            foreach (var charEffect in effects.characterEffects)
-            {
-                var characterManager = Characters.CharacterManager.Instance;
-                if (characterManager != null)
-                {
-                    characterManager.ModifyStat(charEffect.character, charEffect.stat, charEffect.change);
-                }
-            }
-            
-            // Show result message
-            string resultMessage = success ? effects.successMessage : effects.failureMessage;
-            Debug.Log($"📋 Event result: {resultMessage}");
+
+            OnEventSystemMessage.Invoke($"Sentiment changed to {newSentiment:F1}% (change: {sentimentChange:F1})");
         }
-        
-        private bool CanTriggerEvent(GameEvent gameEvent)
+
+        private void OnCharacterStatChanged(Characters.CharacterType character, Characters.CharacterStat stat,
+            float newValue)
         {
-            // Check if event requirements are met
-            var phaseManager = Core.PhaseManager.Instance;
-            if (phaseManager != null && gameEvent.triggerWeek > 0)
+            if (!triggerOnMajorChanges) return;
+
+            // Track major changes
+            var previousValue = GetPreviousStatValue(character, stat);
+            float changeAmount = Mathf.Abs(newValue - previousValue);
+
+            if (changeAmount >= majorChangeThreshold)
             {
-                if (phaseManager.GetCurrentWeek() < gameEvent.triggerWeek) return false;
+                var majorChange = new Community.BalanceChange(character, stat, previousValue, newValue);
+                recentMajorChanges.Add(majorChange);
+
+                // Remove old changes (keep only last 5 minutes of game time)
+                recentMajorChanges.RemoveAll(c => Time.time - c.timestamp > 300f);
+
+                // Trigger event if multiple major changes occurred recently
+                if (recentMajorChanges.Count >= 3)
+                {
+                    TriggerMajorChangeEvent();
+                }
+
+                OnEventSystemMessage.Invoke($"Major change detected: {character} {stat} changed by {changeAmount:F1}");
             }
-            
-            // Add more conditions as needed
-            return true;
         }
-        
-        private void OnPhaseChanged(Core.GamePhase newPhase)
-        {
-            if (newPhase == Core.GamePhase.Event)
-            {
-                TriggerRandomEvent();
-                UpdateEventTimers();
-            }
-        }
-        
+
         private void OnWeekChanged(int newWeek)
         {
-            UpdateEventTimers();
-            TriggerRandomEvent();
-        }
-        
-        private void UpdateEventTimers()
-        {
-            var expiredEvents = new List<GameEvent>();
-            
-            foreach (var evt in activeEvents)
+            currentGameWeek = newWeek;
+
+            if (triggerOnSeasonalEvents)
             {
-                evt.turnsRemaining--;
-                if (evt.IsExpired())
+                // Check for seasonal events
+                if (ShouldTriggerSeasonalEvent(newWeek))
                 {
-                    expiredEvents.Add(evt);
+                    TriggerSeasonalEvent(newWeek);
                 }
             }
-            
-            foreach (var expired in expiredEvents)
+
+            OnEventSystemMessage.Invoke($"Week {newWeek} started - checking for seasonal events");
+        }
+
+        private void OnPhaseChanged(Core.GamePhase newPhase)
+        {
+            // Events more likely to trigger during feedback phase
+            if (newPhase == Core.GamePhase.Event)
             {
-                activeEvents.Remove(expired);
-                OnEventResolved.Invoke(expired);
-            }
-            
-            if (expiredEvents.Count > 0)
-            {
-                OnActiveEventsChanged.Invoke(new List<GameEvent>(activeEvents));
+                CheckForPhaseBasedEvents();
             }
         }
-        
-        private void OnCharacterStatChanged(Characters.CharacterType character, Characters.CharacterStat stat, float newValue)
+
+        #endregion
+
+        #region Event Generation Methods
+
+        private void TriggerCommunityMoodEvent(float sentiment)
         {
-            // Trigger events based on stat changes
-            if (stat == Characters.CharacterStat.WinRate)
+            EventData eventData;
+
+            if (sentiment < 25f)
             {
-                if (newValue > 60f || newValue < 40f)
+                // Very low sentiment - major crisis
+                eventData = EventDataFactory.CreateCommunityFeedbackCrisis();
+            }
+            else
+            {
+                // Moderate low sentiment - smaller issue
+                eventData = EventDataFactory.CreateSupportExploitCrisis();
+            }
+
+            QueueEvent(eventData);
+            OnEventSystemMessage.Invoke($"Community mood event triggered (sentiment: {sentiment:F1}%)");
+        }
+
+        private void TriggerOpportunityEvent(float sentiment)
+        {
+            var opportunityEvents = new[]
+            {
+                EventDataFactory.CreateTournamentOpportunity(),
+                EventDataFactory.CreateMetaShiftOpportunity()
+            };
+
+            var selectedEvent = opportunityEvents[Random.Range(0, opportunityEvents.Length)];
+            QueueEvent(selectedEvent);
+            OnEventSystemMessage.Invoke($"Opportunity event triggered (sentiment: {sentiment:F1}%)");
+        }
+
+        private void TriggerMajorChangeEvent()
+        {
+            // Create an event based on the recent major changes
+            var eventData = CreateMajorChangeReactionEvent();
+            QueueEvent(eventData);
+
+            // Clear the recent changes since we've responded to them
+            recentMajorChanges.Clear();
+            OnEventSystemMessage.Invoke("Major change reaction event triggered");
+        }
+
+        private void TriggerSeasonalEvent(int week)
+        {
+            var seasonalEvent = EventDataFactory.CreateSeasonalEvent(week);
+            QueueEvent(seasonalEvent);
+            OnEventSystemMessage.Invoke($"Seasonal event triggered for week {week}");
+        }
+
+        private void CheckForPhaseBasedEvents()
+        {
+            // During event phase, check if we should trigger contextual events
+            if (Random.Range(0f, 1f) < 0.4f) // 40% chance during event phase
+            {
+                var contextualEvent =
+                    EventDataFactory.CreateContextualEvent(lastCommunitySentiment, recentMajorChanges);
+                QueueEvent(contextualEvent);
+                OnEventSystemMessage.Invoke("Phase-based contextual event triggered");
+            }
+        }
+
+        private EventData CreateMajorChangeReactionEvent()
+        {
+            var eventData = new EventData
+            {
+                eventTitle = "Community Reacting to Major Changes",
+                description =
+                    $"Recent major balance changes have stirred up significant community discussion. {recentMajorChanges.Count} major adjustments in quick succession have players debating the game's direction.",
+                eventType = EventType.CommunityEvent,
+                urgencyLevel = EventUrgency.Medium,
+                responseTimeLimit = 50f,
+                estimatedSentimentImpact = Random.Range(-8f, 8f),
+                expectedImpacts = new List<string>
                 {
-                    // Trigger balance concern event
-                    var balanceEvent = CreateBalanceConcernEvent(character, newValue);
-                    if (Random.Range(0f, 1f) < 0.4f) // 40% chance
+                    "Community divided on changes",
+                    "Meta adaptation period",
+                    "Increased forum activity",
+                    "Content creator reactions"
+                }
+            };
+
+            // Community Management Response
+            eventData.responses[EventResponseType.CommunityManagement] = new EventResponse
+            {
+                responseText = "Address Community Concerns",
+                rpCost = 0,
+                cpCost = 4,
+                communitySentimentChange = 8f,
+                specialEffect = "community_dialogue",
+                successMessage = "Community appreciates transparent communication about changes.",
+                failureMessage = "Response seen as corporate PR. Community remains skeptical."
+            };
+
+            // Emergency Fix Response (minor adjustments)
+            eventData.responses[EventResponseType.EmergencyFix] = new EventResponse
+            {
+                responseText = "Fine-tune Changes",
+                rpCost = 3,
+                cpCost = 1,
+                characterEffects = recentMajorChanges.Take(2).Select(change =>
+                    new CharacterEffect(change.character, change.stat, -change.magnitude * 0.3f)).ToList(),
+                communitySentimentChange = 5f,
+                successMessage = "Fine-tuning addresses community concerns while preserving change intent.",
+                failureMessage = "Adjustments created confusion about design direction."
+            };
+
+            // Observe Response
+            eventData.responses[EventResponseType.ObserveAndLearn] = new EventResponse
+            {
+                responseText = "Monitor Community Adaptation",
+                rpCost = 0,
+                cpCost = 0,
+                communitySentimentChange = -2f,
+                specialEffect = "adaptation_data",
+                successMessage = "Valuable data on community adaptation patterns collected.",
+                failureMessage = "Lack of response seen as indifference to community concerns."
+            };
+
+            return eventData;
+        }
+
+        #endregion
+
+        #region Random Event System
+
+        private void CheckForRandomEvents()
+        {
+            if (Time.time >= nextRandomEventTime && CanSpawnRandomEvent())
+            {
+                if (Random.Range(0f, 1f) < randomEventChance)
+                {
+                    TriggerRandomEvent();
+                }
+
+                ScheduleNextRandomEvent();
+            }
+        }
+
+        private void TriggerRandomEvent()
+        {
+            var randomEvent = EventDataFactory.CreateRandomEvent();
+            QueueEvent(randomEvent);
+            OnEventSystemMessage.Invoke("Random event triggered");
+        }
+
+        private bool CanSpawnRandomEvent()
+        {
+            return activeEvents.Count < maxSimultaneousEvents &&
+                   Time.time - lastEventTime >= minTimeBetweenEvents;
+        }
+
+        private void ScheduleNextRandomEvent()
+        {
+            float nextEventDelay = Random.Range(minTimeBetweenEvents, maxTimeBetweenEvents);
+            nextRandomEventTime = Time.time + nextEventDelay;
+        }
+
+        private bool ShouldTriggerSeasonalEvent(int week)
+        {
+            // Seasonal events more likely at specific intervals
+            return (week % 5 == 0) || // Every 5 weeks
+                   (week % 10 == 1) || // Start of cycles
+                   (week == 1); // First week
+        }
+
+        #endregion
+
+        #region Event Queue and Display Management
+
+        private void QueueEvent(EventData eventData)
+        {
+            eventQueue.Enqueue(eventData);
+            OnEventTriggered.Invoke(eventData);
+            Debug.Log($"🎭 Event queued: {eventData.eventTitle}");
+        }
+
+        private void ProcessEventQueue()
+        {
+            while (eventQueue.Count > 0 && activeEvents.Count < maxSimultaneousEvents)
+            {
+                var eventData = eventQueue.Dequeue();
+                DisplayEvent(eventData);
+            }
+        }
+
+        private void DisplayEvent(EventData eventData)
+        {
+            if (eventUIItemPrefab == null || eventUIContainer == null)
+            {
+                Debug.LogError("❌ Cannot display event: missing prefab or container");
+                return;
+            }
+
+            // Create event UI
+            GameObject eventUIObject = Instantiate(eventUIItemPrefab, eventUIContainer);
+            EventUIItem eventUIItem = eventUIObject.GetComponent<EventUIItem>();
+
+            if (eventUIItem == null)
+            {
+                Debug.LogError("❌ EventUIItem component not found on prefab!");
+                Destroy(eventUIObject);
+                return;
+            }
+
+            // Setup event UI
+            eventUIItem.DisplayEvent(eventData);
+            activeEvents.Add(eventUIItem);
+            lastEventTime = Time.time;
+
+            // Subscribe to event resolution
+            eventUIItem.OnEventResponseSelected.AddListener(OnEventResponseExecuted);
+            eventUIItem.OnEventExpired.AddListener(OnEventExpiredHandler);
+
+            OnEventSystemMessage.Invoke($"Event displayed: {eventData.eventTitle}");
+            Debug.Log($"✅ Event displayed: {eventData.eventTitle}");
+        }
+
+        private void UpdateActiveEvents()
+        {
+            // Clean up completed events
+            for (int i = activeEvents.Count - 1; i >= 0; i--)
+            {
+                if (activeEvents[i] == null || !activeEvents[i].IsActive())
+                {
+                    activeEvents.RemoveAt(i);
+                }
+                else
+                {
+                    // Refresh event display (for resource changes, etc.)
+                    activeEvents[i].RefreshDisplay();
+                }
+            }
+        }
+
+        #endregion
+
+        #region Event Response Handling
+
+        private void OnEventResponseExecuted(EventData eventData, EventResponseType responseType)
+        {
+            OnEventResolved.Invoke(eventData, responseType);
+
+            // Generate additional feedback based on response effectiveness
+            GenerateResponseFeedback(eventData, responseType);
+
+            OnEventSystemMessage.Invoke($"Event resolved: {eventData.eventTitle} with {responseType}");
+            Debug.Log($"🎯 Event resolved: {eventData.eventTitle} with response: {responseType}");
+        }
+
+        private void OnEventExpiredHandler(EventData eventData)
+        {
+            OnEventExpired.Invoke(eventData);
+
+            // Generate negative feedback for ignored events
+            GenerateExpirationFeedback(eventData);
+
+            OnEventSystemMessage.Invoke($"Event expired: {eventData.eventTitle}");
+            Debug.Log($"⏰ Event expired: {eventData.eventTitle}");
+        }
+
+        private void GenerateResponseFeedback(EventData eventData, EventResponseType responseType)
+        {
+            if (feedbackManager == null) return;
+
+            var response = eventData.responses[responseType];
+
+            // Create contextual feedback about the event response
+            var feedbackContent = GenerateEventResponseFeedbackContent(eventData, responseType, response);
+            var feedbackSentiment = CalculateEventResponseSentiment(eventData, responseType, response);
+
+            var responseFeedback = new Community.CommunityFeedback
+            {
+                author = GetEventResponseAuthor(eventData, responseType),
+                content = feedbackContent,
+                sentiment = feedbackSentiment,
+                feedbackType = Community.FeedbackType.BalanceReaction,
+                communitySegment = GetEventResponseSegment(eventData, responseType),
+                timestamp = System.DateTime.Now,
+                upvotes = Random.Range(15, 60),
+                replies = Random.Range(8, 30),
+                isOrganic = false
+            };
+
+            // Add to feedback system
+            feedbackManager.OnNewFeedbackAdded.Invoke(responseFeedback);
+        }
+
+        private void GenerateExpirationFeedback(EventData eventData)
+        {
+            if (feedbackManager == null) return;
+
+            var expirationFeedback = new Community.CommunityFeedback
+            {
+                author = "CommunityWatcher",
+                content = GetExpirationFeedbackContent(eventData),
+                sentiment = Random.Range(-0.8f, -0.3f), // Generally negative
+                feedbackType = Community.FeedbackType.BalanceReaction,
+                communitySegment = "Competitive",
+                timestamp = System.DateTime.Now,
+                upvotes = Random.Range(25, 80),
+                replies = Random.Range(15, 45),
+                isOrganic = false
+            };
+
+            feedbackManager.OnNewFeedbackAdded.Invoke(expirationFeedback);
+        }
+
+        #endregion
+
+        #region Utility Methods
+
+        private float GetPreviousStatValue(Characters.CharacterType character, Characters.CharacterStat stat)
+        {
+            // Look for recent changes to get previous value
+            var recentChange = recentMajorChanges
+                .Where(c => c.character == character && c.stat == stat)
+                .OrderByDescending(c => c.timestamp)
+                .FirstOrDefault();
+
+            return recentChange?.previousValue ?? 50f; // Default to 50 if no previous change
+        }
+
+        private string GenerateEventResponseFeedbackContent(EventData eventData, EventResponseType responseType,
+            EventResponse response)
+        {
+            return (eventData.eventType, responseType) switch
+            {
+                (EventType.Crisis, EventResponseType.EmergencyFix) =>
+                    "Quick response to the crisis! ⚡ Hopefully this fixes the immediate issues",
+                (EventType.Crisis, EventResponseType.CommunityManagement) =>
+                    "Good communication from the devs about this situation 📢",
+                (EventType.Opportunity, EventResponseType.CommunityManagement) =>
+                    "Devs are capitalizing on this opportunity well ★",
+                (EventType.Opportunity, EventResponseType.EmergencyFix) =>
+                    "Smart move to take advantage of this situation ►",
+                (_, EventResponseType.ObserveAndLearn) => "Interesting approach - let's see how this develops 👀",
+                _ => $"Response to {eventData.eventTitle}: {response.responseText}"
+            };
+        }
+
+        private float CalculateEventResponseSentiment(EventData eventData, EventResponseType responseType,
+            EventResponse response)
+        {
+            float baseSentiment = responseType switch
+            {
+                EventResponseType.EmergencyFix => 0.5f, // Generally positive
+                EventResponseType.CommunityManagement => 0.3f, // Moderately positive
+                EventResponseType.ObserveAndLearn => 0.0f, // Neutral
+                EventResponseType.IgnoreEvent => -0.6f, // Negative
+                _ => 0.0f
+            };
+
+            // Adjust based on event urgency
+            if (eventData.urgencyLevel == EventUrgency.Critical && responseType == EventResponseType.EmergencyFix)
+            {
+                baseSentiment += 0.3f; // Extra positive for addressing critical issues quickly
+            }
+
+            // Add variance
+            return Mathf.Clamp(baseSentiment + Random.Range(-0.2f, 0.2f), -1f, 1f);
+        }
+
+        private string GetEventResponseAuthor(EventData eventData, EventResponseType responseType)
+        {
+            return responseType switch
+            {
+                EventResponseType.EmergencyFix => "TechResponse_Team",
+                EventResponseType.CommunityManagement => "Community_Manager",
+                EventResponseType.ObserveAndLearn => "Data_Analyst",
+                EventResponseType.SeekAdvice => "Community_Council",
+                _ => "Event_Observer"
+            };
+        }
+
+        private string GetEventResponseSegment(EventData eventData, EventResponseType responseType)
+        {
+            return (eventData.eventType, responseType) switch
+            {
+                (EventType.Crisis, EventResponseType.EmergencyFix) => "Competitive",
+                (EventType.Crisis, EventResponseType.CommunityManagement) => "Casual Players",
+                (EventType.Opportunity, _) => "Content Creators",
+                (EventType.TournamentEvent, _) => "Pro Players",
+                _ => "General"
+            };
+        }
+
+        private string GetExpirationFeedbackContent(EventData eventData)
+        {
+            return eventData.eventType switch
+            {
+                EventType.Crisis => "No response to this crisis? Community concerns ignored ↓",
+                EventType.Opportunity => "Missed opportunity! Devs should have acted faster ✗",
+                EventType.CommunityEvent => "Community event ignored... disappointing 😕",
+                _ => $"No response to {eventData.eventTitle} - concerning silence"
+            };
+        }
+
+        #endregion
+
+        #region Public API
+
+        /// <summary>
+        /// Manually trigger a specific event (for testing or special occasions)
+        /// </summary>
+        public void TriggerEvent(EventData eventData)
+        {
+            QueueEvent(eventData);
+            OnEventSystemMessage.Invoke($"Manual event triggered: {eventData.eventTitle}");
+        }
+
+        /// <summary>
+        /// Clear all active events (for testing or emergency situations)
+        /// </summary>
+        public void ClearAllEvents()
+        {
+            foreach (var eventUI in activeEvents)
+            {
+                if (eventUI != null)
+                {
+                    eventUI.CloseEvent();
+                }
+            }
+
+            activeEvents.Clear();
+            eventQueue.Clear();
+            OnEventSystemMessage.Invoke("All events cleared");
+        }
+
+        /// <summary>
+        /// Get information about current event system state
+        /// </summary>
+        public (int active, int queued, float nextRandom) GetEventSystemStatus()
+        {
+            float timeToNextRandom = Mathf.Max(0f, nextRandomEventTime - Time.time);
+            return (activeEvents.Count, eventQueue.Count, timeToNextRandom);
+        }
+
+        /// <summary>
+        /// Check if a specific event type is currently active
+        /// </summary>
+        public bool HasActiveEventOfType(EventType eventType)
+        {
+            return activeEvents.Any(e => e.GetCurrentEvent()?.eventType == eventType);
+        }
+
+        /// <summary>
+        /// Force trigger seasonal event for current week
+        /// </summary>
+        public void ForceTriggerSeasonalEvent()
+        {
+            TriggerSeasonalEvent(currentGameWeek);
+        }
+
+        #endregion
+
+        #region Debug Methods
+
+        [ContextMenu("🧪 Test Crisis Event")]
+        public void DebugTestCrisisEvent()
+        {
+            var crisisEvent = EventDataFactory.CreateSupportExploitCrisis();
+            TriggerEvent(crisisEvent);
+        }
+
+        [ContextMenu("🧪 Test Opportunity Event")]
+        public void DebugTestOpportunityEvent()
+        {
+            var opportunityEvent = EventDataFactory.CreateTournamentOpportunity();
+            TriggerEvent(opportunityEvent);
+        }
+
+        [ContextMenu("🧪 Test Random Event")]
+        public void DebugTestRandomEvent()
+        {
+            TriggerRandomEvent();
+        }
+
+        [ContextMenu("🧪 Test All Event Types")]
+        public void DebugTestAllEventTypes()
+        {
+            var testEvents = new[]
+            {
+                EventDataFactory.CreateSupportExploitCrisis(),
+                EventDataFactory.CreateTournamentOpportunity(),
+                EventDataFactory.CreateCommunityFeedbackCrisis(),
+                EventDataFactory.CreateMetaShiftOpportunity()
+            };
+
+            foreach (var eventData in testEvents)
+            {
+                QueueEvent(eventData);
+            }
+
+            OnEventSystemMessage.Invoke("All event types queued for testing");
+        }
+
+        [ContextMenu("🔍 Debug Event System Status")]
+        public void DebugShowEventSystemStatus()
+        {
+            var (active, queued, nextRandom) = GetEventSystemStatus();
+
+            Debug.Log("=== 🔍 EVENT SYSTEM STATUS ===");
+            Debug.Log($"Active Events: {active}/{maxSimultaneousEvents}");
+            Debug.Log($"Queued Events: {queued}");
+            Debug.Log($"Next Random Event: {nextRandom:F1}s");
+            Debug.Log($"Last Event Time: {Time.time - lastEventTime:F1}s ago");
+            Debug.Log($"Community Sentiment: {lastCommunitySentiment:F1}%");
+            Debug.Log($"Recent Major Changes: {recentMajorChanges.Count}");
+            Debug.Log($"Current Week: {currentGameWeek}");
+
+            if (activeEvents.Count > 0)
+            {
+                Debug.Log("\nActive Events:");
+                foreach (var eventUI in activeEvents)
+                {
+                    var eventData = eventUI.GetCurrentEvent();
+                    if (eventData != null)
                     {
-                        TriggerEvent(balanceEvent);
+                        Debug.Log(
+                            $"  {eventData.eventTitle} ({eventData.eventType}) - {eventUI.GetTimeRemaining():F1}s remaining");
                     }
                 }
             }
         }
-        
-        private void OnBalanceChanged(float balance)
+
+        [ContextMenu("🔄 Force Random Event")]
+        public void DebugForceRandomEvent()
         {
-            if (balance < 30f)
+            nextRandomEventTime = Time.time; // Trigger immediately
+            OnEventSystemMessage.Invoke("Random event forced");
+        }
+
+        [ContextMenu("🧹 Clear All Events")]
+        public void DebugClearAllEvents()
+        {
+            ClearAllEvents();
+        }
+
+        [ContextMenu("📊 Test Event Response Feedback")]
+        public void DebugTestEventResponseFeedback()
+        {
+            var testEvent = EventDataFactory.CreateSupportExploitCrisis();
+            GenerateResponseFeedback(testEvent, EventResponseType.EmergencyFix);
+            OnEventSystemMessage.Invoke("Test event response feedback generated");
+        }
+
+        #endregion
+
+        private void OnDestroy()
+        {
+            // Clean up subscriptions
+            if (feedbackManager != null)
             {
-                // Trigger emergency balance meeting
-                if (Random.Range(0f, 1f) < 0.6f)
-                {
-                    TriggerEvent(CreateEmergencyMeetingEvent());
-                }
+                feedbackManager.OnCommunitySentimentChanged.RemoveListener(OnCommunitySentimentChanged);
             }
-        }
-        
-        private void OnSentimentChanged(float sentiment)
-        {
-            if (sentiment < 25f)
+
+            if (characterManager != null)
             {
-                // Trigger community outrage event
-                if (Random.Range(0f, 1f) < 0.5f)
-                {
-                    TriggerEvent(CreateCommunityOutrageEvent());
-                }
+                characterManager.OnStatChanged.RemoveListener(OnCharacterStatChanged);
             }
-        }
-        
-        private GameEvent CreateBalanceConcernEvent(Characters.CharacterType character, float winRate)
-        {
-            string issue = winRate > 60f ? "overpowered" : "underpowered";
-            
-            return new GameEvent
+
+            if (phaseManager != null)
             {
-                eventId = $"balance_concern_{character}_{System.DateTime.Now.Ticks}",
-                eventTitle = $"{character} Balance Concerns",
-                eventDescription = $"Community is concerned that {character} is {issue} with a {winRate:F1}% win rate.",
-                eventType = EventType.Community,
-                severity = winRate > 65f || winRate < 35f ? EventSeverity.High : EventSeverity.Medium,
-                duration = 2f,
-                turnsRemaining = 2,
-                affectedCharacters = { character.ToString() },
-                eventColor = winRate > 60f ? new Color(1f, 0.4f, 0.1f) : new Color(0.2f, 0.4f, 1f)
-            };
-        }
-        
-        private GameEvent CreateEmergencyMeetingEvent()
-        {
-            return new GameEvent
-            {
-                eventId = $"emergency_meeting_{System.DateTime.Now.Ticks}",
-                eventTitle = "Emergency Balance Meeting",
-                eventDescription = "The balance team has called an emergency meeting due to concerning game state.",
-                eventType = EventType.Crisis,
-                severity = EventSeverity.Critical,
-                duration = 1f,
-                turnsRemaining = 1,
-                isUrgent = true,
-                eventColor = new Color(0.8f, 0.1f, 0.1f)
-            };
-        }
-        
-        private GameEvent CreateCommunityOutrageEvent()
-        {
-            return new GameEvent
-            {
-                eventId = $"community_outrage_{System.DateTime.Now.Ticks}",
-                eventTitle = "Community Outrage",
-                eventDescription = "The community is extremely upset with the current state of the game.",
-                eventType = EventType.Community,
-                severity = EventSeverity.High,
-                duration = 3f,
-                turnsRemaining = 3,
-                eventColor = new Color(0.8f, 0.1f, 0.1f)
-            };
-        }
-        
-        // Public API
-        public List<GameEvent> GetActiveEvents() => new List<GameEvent>(activeEvents);
-        public GameEvent GetEventById(string eventId) => eventDatabase.GetValueOrDefault(eventId);
-        public void RegisterEvent(GameEvent gameEvent) 
-        {
-            if (!string.IsNullOrEmpty(gameEvent.eventId))
-            {
-                eventDatabase[gameEvent.eventId] = gameEvent;
-                if (!availableEvents.Contains(gameEvent))
-                {
-                    availableEvents.Add(gameEvent);
-                }
+                phaseManager.OnWeekChanged.RemoveListener(OnWeekChanged);
+                phaseManager.OnPhaseChanged.RemoveListener(OnPhaseChanged);
             }
-        }
-        
-        // Debug methods
-        [ContextMenu("🎯 Trigger Random Event")]
-        public void DebugTriggerRandomEvent()
-        {
-            TriggerRandomEvent();
-        }
-        
-        [ContextMenu("🚨 Trigger Crisis Event")]
-        public void DebugTriggerCrisisEvent()
-        {
-            TriggerEvent(CreateCrisisEvent());
-        }
-        
-        [ContextMenu("📊 Show Active Events")]
-        public void DebugShowActiveEvents()
-        {
-            Debug.Log($"=== Active Events ({activeEvents.Count}) ===");
-            foreach (var evt in activeEvents)
-            {
-                Debug.Log($"{evt.eventTitle} - {evt.severity} - {evt.GetTimeRemaining()}");
-            }
+
+            Debug.Log("🎭 Event Manager destroyed and cleaned up");
         }
     }
 }

@@ -277,6 +277,7 @@ GameObject:
   m_Component:
   - component: {fileID: 120025412}
   - component: {fileID: 120025413}
+  - component: {fileID: 120025414}
   m_Layer: 5
   m_Name: Content
   m_TagString: Untagged
@@ -301,7 +302,7 @@ RectTransform:
   m_AnchorMin: {x: 0, y: 1}
   m_AnchorMax: {x: 1, y: 1}
   m_AnchoredPosition: {x: 0, y: 0}
-  m_SizeDelta: {x: 0, y: 300}
+  m_SizeDelta: {x: 0, y: 0}
   m_Pivot: {x: 0, y: 1}
 --- !u!114 &120025413
 MonoBehaviour:
@@ -321,14 +322,28 @@ MonoBehaviour:
     m_Top: 0
     m_Bottom: 0
   m_ChildAlignment: 0
-  m_Spacing: 10
-  m_ChildForceExpandWidth: 0
-  m_ChildForceExpandHeight: 0
+  m_Spacing: 270
+  m_ChildForceExpandWidth: 1
+  m_ChildForceExpandHeight: 1
   m_ChildControlWidth: 0
   m_ChildControlHeight: 0
   m_ChildScaleWidth: 1
   m_ChildScaleHeight: 1
   m_ReverseArrangement: 0
+--- !u!114 &120025414
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 120025411}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3245ec927659c4140ac4f8d17403cc18, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  m_HorizontalFit: 0
+  m_VerticalFit: 2
 --- !u!1 &133895634
 GameObject:
   m_ObjectHideFlags: 0
@@ -1125,7 +1140,7 @@ MonoBehaviour:
     m_Top: 0
     m_Bottom: 0
   m_ChildAlignment: 1
-  m_Spacing: 10
+  m_Spacing: 5
   m_ChildForceExpandWidth: 1
   m_ChildForceExpandHeight: 1
   m_ChildControlWidth: 0
@@ -1443,7 +1458,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &414206659
 RectTransform:
   m_ObjectHideFlags: 0
@@ -1776,12 +1791,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 56b6d3b6a791ceb40b13a769f91c48f9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  eventContainer: {fileID: 0}
-  eventItemPrefab: {fileID: 2910046101660351043, guid: a65995a725d0fe6438a4e04f55d8fc5e, type: 3}
+  eventContainer: {fileID: 120025412}
+  eventItemPrefab: {fileID: 3378284576221120600, guid: a65995a725d0fe6438a4e04f55d8fc5e, type: 3}
   eventScrollRect: {fileID: 0}
-  noEventsText: {fileID: 0}
+  noEventsText: {fileID: 414206660}
   maxVisibleEvents: 5
-  eventUpdateInterval: 1
+  advanceEventsOnWeekChange: 1
+  advanceEventsOnPhaseChange: 0
   enableTestEvents: 0
   testEventInterval: 5
 --- !u!1 &509616049
@@ -4182,7 +4198,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!224 &1243050212
 RectTransform:
   m_ObjectHideFlags: 0
@@ -4219,7 +4235,7 @@ MonoBehaviour:
   m_Content: {fileID: 120025412}
   m_Horizontal: 0
   m_Vertical: 1
-  m_MovementType: 1
+  m_MovementType: 2
   m_Elasticity: 0.1
   m_Inertia: 1
   m_DecelerationRate: 0.135
@@ -4564,7 +4580,72 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 12aea750ec1caac4ebf8189f25b9f228, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  availableEvents: []
+  availableEvents:
+  - eventId: 1
+    eventTitle: 2
+    eventDescription: 3
+    eventType: 0
+    severity: 0
+    affectedCharacters: []
+    requiredTags: []
+    triggerWeek: 0
+    duration: 0
+    availableResponses:
+    - responseId: test
+      buttonText: test
+      responseDescription: test
+      responseType: 1
+      rpCost: 3
+      cpCost: 0
+      requiredCardTypes: 00000000
+      requiredCardCount: 0
+      effects:
+        satisfactionChange: 3
+        rpReward: -3
+        cpReward: 0
+        characterEffects: []
+        successChance: 0.574
+        triggeredEventIds: []
+        successMessage: 
+        failureMessage: 
+      requiredConditions: []
+      isAvailable: 0
+      unavailableReason: 
+    defaultResponse:
+      responseId: 
+      buttonText: 
+      responseDescription: 
+      responseType: 0
+      rpCost: 0
+      cpCost: 0
+      requiredCardTypes: 
+      requiredCardCount: 0
+      effects:
+        satisfactionChange: 0
+        rpReward: 0
+        cpReward: 0
+        characterEffects: []
+        successChance: 0
+        triggeredEventIds: []
+        successMessage: 
+        failureMessage: 
+      requiredConditions: []
+      isAvailable: 0
+      unavailableReason: 
+    effects:
+      characterEffects: []
+      rpChange: 0
+      cpChange: 0
+      satisfactionChange: 0
+      communityMessage: 
+      triggersMetaShift: 0
+      metaStabilityChange: 0
+    eventIcon: {fileID: 0}
+    eventColor: {r: 0, g: 0, b: 0, a: 0}
+    eventSound: {fileID: 0}
+    isActive: 0
+    isUrgent: 1
+    turnsRemaining: 3
   maxActiveEvents: 3
   eventTriggerChance: 0.3
   OnEventTriggered:
@@ -6136,8 +6217,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: 7.5, y: 0}
-  m_SizeDelta: {x: -17, y: 0}
+  m_AnchoredPosition: {x: 0, y: 0}
+  m_SizeDelta: {x: 0, y: 0}
   m_Pivot: {x: 0, y: 1}
 --- !u!114 &1819918828
 MonoBehaviour:
@@ -6859,7 +6940,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   allAvailableCards:
-  - {fileID: 0}
+  - {fileID: 11400000, guid: 8780ad6a82e38a147b532944f2705352, type: 2}
   handContainer: {fileID: 2114909648}
   cardPrefab: {fileID: 5515714580577115897, guid: f3455461a140e0447a0094bd0d2363c4, type: 3}
   maxHandSize: 7
