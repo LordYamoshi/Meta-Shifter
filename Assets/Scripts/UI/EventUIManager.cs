@@ -1,4 +1,4 @@
-[ContextMenu("📊 Show Event Statistics")]        private void OnOverallBalanceChanged(float balanceScore)using UnityEngine;
+using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using System.Collections.Generic;
@@ -462,33 +462,7 @@ namespace MetaBalance.UI
             }
         }
         
-        private void GenerateWeeklyEvent(int weekNumber)
-        {
-            var weeklyEvents = new[]
-            {
-                new EventData
-                {
-                    Title = $"Week {weekNumber} Community Check-in",
-                    Description = "Time to assess community sentiment and address any brewing concerns.",
-                    Severity = EventSeverity.Medium,
-                    EventType = EventType.Community,
-                    TimeRemaining = 4f,  // 4 turns to respond  // 3 turns to respond
-                    Impact = 4.0f
-                },
-                new EventData
-                {
-                    Title = "Weekly Performance Review",
-                    Description = "Server metrics show unusual patterns. Investigation recommended.",
-                    Severity = EventSeverity.Low,
-                    EventType = EventType.Technical,
-                    TimeRemaining = 5f,  // 5 turns to investigate
-                    Impact = 3.2f
-                }
-            };
-            
-            var selectedEvent = weeklyEvents[Random.Range(0, weeklyEvents.Length)];
-            CreateEvent(selectedEvent);
-        }
+        private void OnOverallBalanceChanged(float balanceScore)
         {
             // Generate events based on balance changes
             if (balanceScore < 40f)
@@ -500,17 +474,32 @@ namespace MetaBalance.UI
             }
         }
         
-        private void OnPhaseChanged(Core.GamePhase newPhase)
+        private void GenerateWeeklyEvent(int weekNumber)
         {
-            // Generate phase-specific events
-            if (newPhase == Core.GamePhase.Event)
+            var weeklyEvents = new[]
             {
-                // Event phase - higher chance of events
-                if (Random.Range(0f, 1f) < 0.4f)
+                new EventData
                 {
-                    GeneratePhaseSpecificEvent();
+                    Title = $"Week {weekNumber} Community Check-in",
+                    Description = "Time to assess community sentiment and address any brewing concerns.",
+                    Severity = EventSeverity.Medium,
+                    EventType = EventType.Community,
+                    TimeRemaining = 4f,
+                    Impact = 4.0f
+                },
+                new EventData
+                {
+                    Title = "Weekly Performance Review",
+                    Description = "Server metrics show unusual patterns. Investigation recommended.",
+                    Severity = EventSeverity.Low,
+                    EventType = EventType.Technical,
+                    TimeRemaining = 5f,
+                    Impact = 3.2f
                 }
-            }
+            };
+            
+            var selectedEvent = weeklyEvents[Random.Range(0, weeklyEvents.Length)];
+            CreateEvent(selectedEvent);
         }
         
         #endregion
@@ -527,7 +516,7 @@ namespace MetaBalance.UI
                     Description = "Players are organizing a boycott due to recent balance changes. Immediate response needed.",
                     Severity = EventSeverity.High,
                     EventType = EventType.Community,
-                    TimeRemaining = 3f,  // 3 turns to respond
+                    TimeRemaining = 3f,
                     Impact = 7.5f
                 },
                 new EventData
@@ -774,6 +763,8 @@ namespace MetaBalance.UI
             AdvanceAllEventsByOneTurn();
             Debug.Log("⏰ Manually advanced all events by 1 turn");
         }
+        
+        [ContextMenu("📊 Show Event Statistics")]
         public void DebugShowEventStatistics()
         {
             Debug.Log("=== EVENT STATISTICS ===");
@@ -807,6 +798,7 @@ namespace MetaBalance.UI
             if (Core.PhaseManager.Instance != null)
             {
                 Core.PhaseManager.Instance.OnPhaseChanged.RemoveListener(OnPhaseChanged);
+                Core.PhaseManager.Instance.OnWeekChanged.RemoveListener(OnWeekChanged);
             }
             
             Debug.Log("🎭 EventUIManager destroyed and cleaned up");
