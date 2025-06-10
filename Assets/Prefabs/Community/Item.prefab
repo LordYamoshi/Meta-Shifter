@@ -351,7 +351,7 @@ MonoBehaviour:
   proPlayerColor: {r: 1, g: 0.8, b: 0.2, a: 1}
   contentCreatorColor: {r: 0.8, g: 0.2, b: 0.8, a: 1}
   competitiveColor: {r: 1, g: 0.4, b: 0.1, a: 1}
-  casualColor: {r: 0.2, g: 0.7, b: 1, a: 1}
+  casualColor: {r: 0.6, g: 0.8, b: 1, a: 1}
   vipColor: {r: 0.9, g: 0.1, b: 0.9, a: 1}
   positiveColor: {r: 0.2, g: 0.8, b: 0.2, a: 1}
   negativeColor: {r: 0.8, g: 0.2, b: 0.2, a: 1}

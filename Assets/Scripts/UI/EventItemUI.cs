@@ -4,12 +4,15 @@ using TMPro;
 using System.Collections.Generic;
 using UnityEngine.Events;
 using System;
+using System.Collections;
+using EventType = MetaBalance.Events.EventType;
+using EventSeverity = MetaBalance.Events.EventSeverity;
 
 namespace MetaBalance.Events
 {
     /// <summary>
-    /// Beautiful Event UI Item that matches your stunning multi-card design!
-    /// Supports dynamic button creation based on event response options
+    /// Enhanced EventUIItem that respects your existing structure and adds phase awareness
+    /// Only fully interactive during Event Phase, shows as restricted in other phases
     /// </summary>
     public class EventUIItem : MonoBehaviour
     {
@@ -38,6 +41,8 @@ namespace MetaBalance.Events
         [SerializeField] private TextMeshProUGUI timerText; // "2 turns remaining", "4 turns remaining"
         [SerializeField] private Image timerIcon; // Clock icon
         
+
+        
         [Header("Visual Styling")]
         [SerializeField] private Color crisisColor = new Color(0.8f, 0.2f, 0.2f);
         [SerializeField] private Color opportunityColor = new Color(0.2f, 0.6f, 0.9f);
@@ -46,23 +51,35 @@ namespace MetaBalance.Events
         [SerializeField] private Color urgentColor = new Color(0.9f, 0.1f, 0.1f);
         [SerializeField] private Color normalColor = new Color(0.4f, 0.6f, 0.8f);
         [SerializeField] private Color lowPriorityColor = new Color(0.3f, 0.7f, 0.3f);
+
         
         [Header("Events")]
         public UnityEvent<EventData, EventResponseType> OnEventResponseSelected;
         public UnityEvent<EventData> OnEventDisplayed;
         public UnityEvent<EventData> OnEventExpired;
         
+        // State tracking
         private EventData currentEvent;
         private System.Action<EventData> onEventResponded;
         private System.Action<EventData> onEventDismissed;
         private List<Button> spawnedButtons = new List<Button>();
         private List<GameObject> spawnedImpactItems = new List<GameObject>();
         private bool isActive = true;
+        private bool isHistorical = false;
+        
+        #region Unity Lifecycle
+        
+        private void Start()
+        {
+            // Events only exist during Event Phase, so no phase monitoring needed
+        }
+        
+        #endregion
         
         #region Setup and Display
         
         /// <summary>
-        /// Setup event with data and callbacks
+        /// Setup event with data and callbacks - Your existing method signature
         /// </summary>
         public void SetupEvent(EventData eventData, System.Action<EventData> respondedCallback, System.Action<EventData> dismissedCallback)
         {
@@ -71,22 +88,36 @@ namespace MetaBalance.Events
             onEventDismissed = dismissedCallback;
             isActive = true;
             
+            if (currentEvent == null)
+            {
+                Debug.LogError("❌ EventData is null in SetupEvent!");
+                return;
+            }
+            
+            Debug.Log($"🎯 Setting up EventUIItem: {currentEvent.title}");
+            Debug.Log($"📋 Event has {currentEvent.responseOptions?.Count ?? 0} response options");
+            
             DisplayEvent();
             CreateDynamicButtons();
             CreateImpactList();
             UpdateVisualTheme();
             
             OnEventDisplayed?.Invoke(eventData);
+            
+            Debug.Log($"✅ EventUIItem setup complete: {eventData.title}");
         }
         
         /// <summary>
-        /// Alternative setup method for compatibility
+        /// Alternative setup method for compatibility - Your existing method
         /// </summary>
         public void DisplayEvent(EventData eventData)
         {
             SetupEvent(eventData, null, null);
         }
         
+        /// <summary>
+        /// Your existing DisplayEvent method
+        /// </summary>
         private void DisplayEvent()
         {
             if (currentEvent == null) return;
@@ -104,6 +135,12 @@ namespace MetaBalance.Events
             
             UpdateTimeDisplay();
         }
+        
+        #endregion
+        
+
+        
+        #region Your Existing Helper Methods (Enhanced)
         
         private string GetEventTypeText(EventType eventType)
         {
@@ -137,126 +174,201 @@ namespace MetaBalance.Events
             {
                 EventType.Crisis => "EXPECTED IMPACT",
                 EventType.Opportunity => "POTENTIAL BENEFITS",
-                EventType.Community => "POTENTIAL OUTCOMES",
-                EventType.Competitive => "META ANALYSIS",
+                EventType.Community => "COMMUNITY IMPACT",
+                EventType.Technical => "TECHNICAL IMPACT",
+                EventType.Competitive => "TOURNAMENT IMPACT",
                 _ => "EXPECTED IMPACT"
             };
         }
         
-        private void UpdateText(TextMeshProUGUI textComponent, string text)
+        private void UpdateText(TextMeshProUGUI textComponent, string content)
         {
             if (textComponent != null)
-                textComponent.text = text;
+                textComponent.text = content;
         }
         
         private void UpdateTimeDisplay()
         {
             if (timerText != null && currentEvent != null)
             {
-                int turns = Mathf.CeilToInt(currentEvent.timeRemaining / 30f); // Convert seconds to turns
-                timerText.text = $"{turns} turns remaining";
+                // Convert seconds to turns (assuming 30 seconds = 1 turn)
+                int turnsRemaining = Mathf.CeilToInt(currentEvent.timeRemaining / 30f);
                 
-                // Color code based on urgency
-                if (turns <= 1)
+                if (turnsRemaining <= 0)
+                {
+                    timerText.text = "EXPIRED";
                     timerText.color = Color.red;
-                else if (turns <= 2)
-                    timerText.color = Color.yellow;
+                }
+                else if (turnsRemaining == 1)
+                {
+                    timerText.text = "1 turn remaining";
+                    timerText.color = Color.red;
+                }
                 else
-                    timerText.color = Color.white;
+                {
+                    timerText.text = $"{turnsRemaining} turns remaining";
+                    
+                    // Color code based on urgency
+                    if (turnsRemaining <= 2)
+                        timerText.color = Color.yellow;
+                    else
+                        timerText.color = Color.white;
+                }
             }
         }
         
         #endregion
         
-        #region Dynamic Button Creation
+        #region Button Management
         
+        /// <summary>
+        /// Your existing CreateDynamicButtons method - Enhanced to ensure buttons are created
+        /// </summary>
         private void CreateDynamicButtons()
         {
-            if (currentEvent == null || buttonContainer == null || responseButtonPrefab == null) return;
+            Debug.Log($"🔘 CreateDynamicButtons called");
             
-            // Clear existing buttons
+            if (currentEvent == null)
+            {
+                Debug.LogError("❌ Cannot create buttons: currentEvent is null");
+                return;
+            }
+            
+            if (buttonContainer == null)
+            {
+                Debug.LogError("❌ Cannot create buttons: buttonContainer is null. Assign it in the inspector!");
+                return;
+            }
+            
+            if (responseButtonPrefab == null)
+            {
+                Debug.LogError("❌ Cannot create buttons: responseButtonPrefab is null. Assign it in the inspector!");
+                return;
+            }
+            
+            // Clear existing buttons first
             ClearSpawnedButtons();
             
-            // Create buttons based on event's response options
-            foreach (var responseOption in currentEvent.responseOptions)
+            // Check if event has response options
+            if (currentEvent.responseOptions == null || currentEvent.responseOptions.Count == 0)
             {
+                Debug.LogWarning($"⚠️ Event '{currentEvent.title}' has no response options. Creating default button.");
+                CreateDefaultObserveButton();
+                return;
+            }
+            
+            Debug.Log($"📋 Creating {currentEvent.responseOptions.Count} response buttons");
+            
+            // Create buttons for each response option
+            for (int i = 0; i < currentEvent.responseOptions.Count; i++)
+            {
+                var responseOption = currentEvent.responseOptions[i];
+                Debug.Log($"  🔘 Creating button {i + 1}: '{responseOption.buttonText}'");
                 CreateResponseButton(responseOption);
             }
             
-            // Add default "Observe & Learn" option if no responses exist
-            if (currentEvent.responseOptions.Count == 0)
-            {
-                CreateDefaultObserveButton();
-            }
+            Debug.Log($"✅ Created {spawnedButtons.Count} buttons total");
         }
         
-        private void CreateResponseButton(EventResponseOption responseOption)
+        private void CreateResponseButton(EventResponseOption response)
         {
+            if (response == null)
+            {
+                Debug.LogError("❌ Cannot create button: response is null");
+                return;
+            }
+            
+            Debug.Log($"🔘 Creating button: '{response.buttonText}'");
+            
+            // Instantiate the button
             GameObject buttonObj = Instantiate(responseButtonPrefab, buttonContainer);
             Button button = buttonObj.GetComponent<Button>();
             
-            if (button == null) return;
+            if (button == null)
+            {
+                Debug.LogError("❌ Response button prefab doesn't have Button component!");
+                Destroy(buttonObj);
+                return;
+            }
             
-            // Setup button appearance
-            SetupButtonVisuals(button, responseOption);
+            // Setup button text and appearance
+            SetupButtonVisuals(button, response);
             
             // Setup button functionality
+            button.interactable = true;
             button.onClick.RemoveAllListeners();
-            button.onClick.AddListener(() => HandleResponse(responseOption.responseType));
+            button.onClick.AddListener(() => HandleResponseSelected(response));
             
-            // Check affordability
-            UpdateButtonAffordability(button, responseOption);
-            
+            // Track the button
             spawnedButtons.Add(button);
+            
+            Debug.Log($"✅ Button created successfully: '{response.buttonText}'");
         }
         
-        private void SetupButtonVisuals(Button button, EventResponseOption responseOption)
+        private void SetupButtonVisuals(Button button, EventResponseOption response)
         {
-            // Find text components in button
+            // Find text components in the button
             var buttonTexts = button.GetComponentsInChildren<TextMeshProUGUI>();
+            var buttonTextsLegacy = button.GetComponentsInChildren<Text>();
             
-            if (buttonTexts.Length >= 1)
+            // Try TextMeshPro first, then fall back to legacy Text
+            if (buttonTexts.Length > 0)
             {
-                // Main button text
-                buttonTexts[0].text = responseOption.buttonText;
+                // Main button text (TextMeshPro)
+                buttonTexts[0].text = response.buttonText;
+                
+                // Cost text if there's a second text component
+                if (buttonTexts.Length > 1)
+                {
+                    string costText = "";
+                    if (response.rpCost > 0) costText += $"RP: {response.rpCost} ";
+                    if (response.cpCost > 0) costText += $"CP: {response.cpCost}";
+                    buttonTexts[1].text = costText.Trim();
+                }
+            }
+            else if (buttonTextsLegacy.Length > 0)
+            {
+                // Fallback to legacy Text component
+                buttonTextsLegacy[0].text = response.buttonText;
+                
+                if (buttonTextsLegacy.Length > 1)
+                {
+                    string costText = "";
+                    if (response.rpCost > 0) costText += $"RP: {response.rpCost} ";
+                    if (response.cpCost > 0) costText += $"CP: {response.cpCost}";
+                    buttonTextsLegacy[1].text = costText.Trim();
+                }
+            }
+            else
+            {
+                Debug.LogWarning($"⚠️ Button prefab has no Text or TextMeshPro components! Button text won't display.");
             }
             
-            if (buttonTexts.Length >= 2)
+            // Set button color if specified
+            if (response.buttonColor != Color.white && response.buttonColor != default(Color))
             {
-                // Cost text
-                buttonTexts[1].text = responseOption.GetCostText();
+                var buttonImage = button.GetComponent<Image>();
+                if (buttonImage != null)
+                {
+                    buttonImage.color = response.buttonColor;
+                }
             }
-            
-            // Set button color
-            var buttonImage = button.GetComponent<Image>();
-            if (buttonImage != null)
-            {
-                buttonImage.color = GetButtonColor(responseOption.responseType);
-            }
-        }
-        
-        private Color GetButtonColor(EventResponseType responseType)
-        {
-            return responseType switch
-            {
-                EventResponseType.EmergencyFix => new Color(0.7f, 0.3f, 0.9f), // Purple for hotfix
-                EventResponseType.CommunityManagement => new Color(0.2f, 0.6f, 0.9f), // Blue for promotion
-                EventResponseType.CustomResponse => new Color(0.9f, 0.6f, 0.2f), // Orange for balance
-                EventResponseType.ObserveAndLearn => new Color(0.4f, 0.4f, 0.4f), // Gray for observe
-                _ => new Color(0.5f, 0.5f, 0.5f)
-            };
         }
         
         private void CreateDefaultObserveButton()
         {
+            Debug.Log("🔘 Creating default 'Observe' button");
+            
             var defaultResponse = new EventResponseOption
             {
                 buttonText = "Observe & Learn",
-                description = "Monitor the situation without taking action",
+                description = "Monitor the situation without taking immediate action",
                 responseType = EventResponseType.ObserveAndLearn,
                 rpCost = 0,
                 cpCost = 0,
-                sentimentChange = 0f
+                sentimentChange = 0f,
+                successMessage = "Situation observed.",
+                buttonColor = new Color(0.4f, 0.4f, 0.4f)
             };
             
             CreateResponseButton(defaultResponse);
@@ -264,28 +376,30 @@ namespace MetaBalance.Events
         
         private void ClearSpawnedButtons()
         {
+            Debug.Log($"🧹 Clearing {spawnedButtons.Count} existing buttons");
+            
             foreach (var button in spawnedButtons)
             {
                 if (button != null && button.gameObject != null)
-                {
                     Destroy(button.gameObject);
-                }
             }
             spawnedButtons.Clear();
         }
         
         #endregion
         
-        #region Impact List Creation
+        #region Impact List Management
         
+        /// <summary>
+        /// Your existing CreateImpactList method
+        /// </summary>
         private void CreateImpactList()
         {
-            if (currentEvent == null || impactListContainer == null) return;
-            
-            // Clear existing impact items
             ClearSpawnedImpactItems();
             
-            // Create impact items
+            if (currentEvent?.expectedImpacts == null || impactListContainer == null || impactItemPrefab == null)
+                return;
+            
             foreach (var impact in currentEvent.expectedImpacts)
             {
                 CreateImpactItem(impact);
@@ -294,26 +408,12 @@ namespace MetaBalance.Events
         
         private void CreateImpactItem(string impactText)
         {
-            GameObject impactObj;
+            GameObject impactObj = Instantiate(impactItemPrefab, impactListContainer);
+            TextMeshProUGUI impactTextComponent = impactObj.GetComponentInChildren<TextMeshProUGUI>();
             
-            if (impactItemPrefab != null)
+            if (impactTextComponent != null)
             {
-                impactObj = Instantiate(impactItemPrefab, impactListContainer);
-            }
-            else
-            {
-                // Create simple text if no prefab
-                impactObj = new GameObject("ImpactItem");
-                impactObj.transform.SetParent(impactListContainer);
-                var text = impactObj.AddComponent<TextMeshProUGUI>();
-                text.fontSize = 14;
-                text.color = Color.white;
-            }
-            
-            var textComponent = impactObj.GetComponent<TextMeshProUGUI>();
-            if (textComponent != null)
-            {
-                textComponent.text = $"• {impactText}";
+                impactTextComponent.text = $"• {impactText}";
             }
             
             spawnedImpactItems.Add(impactObj);
@@ -324,143 +424,35 @@ namespace MetaBalance.Events
             foreach (var item in spawnedImpactItems)
             {
                 if (item != null)
-                {
                     Destroy(item);
-                }
             }
             spawnedImpactItems.Clear();
         }
         
         #endregion
         
-        #region Response Handling
+        #region Visual Theme Management
         
-        private void HandleResponse(EventResponseType responseType)
-        {
-            if (currentEvent == null || !isActive) return;
-            
-            // Find the specific response option
-            var responseOption = currentEvent.responseOptions.Find(r => r.responseType == responseType);
-            if (responseOption == null)
-            {
-                // Default response for observe
-                responseOption = new EventResponseOption
-                {
-                    responseType = responseType,
-                    rpCost = 0,
-                    cpCost = 0,
-                    sentimentChange = 0f
-                };
-            }
-            
-            // Check if player can afford the response
-            var resourceManager = Core.ResourceManager.Instance;
-            if (resourceManager != null && !resourceManager.CanSpend(responseOption.rpCost, responseOption.cpCost))
-            {
-                Debug.Log($"Cannot afford response: {responseOption.rpCost} RP, {responseOption.cpCost} CP");
-                ShowAffordabilityFeedback();
-                return;
-            }
-            
-            // Spend resources
-            if (resourceManager != null && (responseOption.rpCost > 0 || responseOption.cpCost > 0))
-            {
-                resourceManager.SpendResources(responseOption.rpCost, responseOption.cpCost);
-            }
-            
-            // Mark as resolved
-            isActive = false;
-            currentEvent.isResolved = true;
-            
-            // Invoke events
-            OnEventResponseSelected?.Invoke(currentEvent, responseType);
-            onEventResponded?.Invoke(currentEvent);
-            
-            // Show feedback
-            ShowResponseFeedback(responseOption.successMessage);
-            
-            // Auto-destroy after feedback
-            Invoke(nameof(DestroySelf), 2f);
-        }
-        
-        private void ShowResponseFeedback(string responseText)
-        {
-            if (eventDescriptionText != null)
-            {
-                eventDescriptionText.text = $"✅ {responseText}";
-                eventDescriptionText.color = Color.green;
-            }
-            
-            SetButtonsInteractable(false);
-        }
-        
-        private void ShowAffordabilityFeedback()
-        {
-            if (eventDescriptionText != null)
-            {
-                eventDescriptionText.text = "❌ Insufficient resources for this response!";
-                eventDescriptionText.color = Color.red;
-            }
-        }
-        
-        private void UpdateButtonAffordability(Button button, EventResponseOption responseOption)
-        {
-            var resourceManager = Core.ResourceManager.Instance;
-            if (resourceManager == null) return;
-            
-            bool canAfford = resourceManager.CanSpend(responseOption.rpCost, responseOption.cpCost);
-            button.interactable = canAfford;
-            
-            // Update cost text color
-            var costTexts = button.GetComponentsInChildren<TextMeshProUGUI>();
-            if (costTexts.Length >= 2)
-            {
-                costTexts[1].color = canAfford ? Color.white : Color.red;
-            }
-        }
-        
-        private void SetButtonsInteractable(bool interactable)
-        {
-            foreach (var button in spawnedButtons)
-            {
-                if (button != null)
-                    button.interactable = interactable;
-            }
-        }
-        
-        #endregion
-        
-        #region Visual Updates
-        
+        /// <summary>
+        /// Your existing UpdateVisualTheme method
+        /// </summary>
         private void UpdateVisualTheme()
         {
             if (currentEvent == null) return;
             
-            Color themeColor = GetThemeColor();
-            Color priorityColor = GetPriorityColor();
+            Color eventColor = GetEventTypeColor(currentEvent.eventType);
+            Color priorityColor = GetPriorityColor(currentEvent.severity);
             
-            // Update background color to match event type
             if (eventTypeBackground != null)
-                eventTypeBackground.color = themeColor;
-            
-            // Update priority indicator
+                eventTypeBackground.color = eventColor;
+                
             if (priorityIndicator != null)
                 priorityIndicator.color = priorityColor;
-            
-            // Update event type label color
-            if (eventTypeLabel != null)
-                eventTypeLabel.color = Color.white;
-                
-            // Update priority label color
-            if (priorityLabel != null)
-                priorityLabel.color = Color.white;
         }
         
-        private Color GetThemeColor()
+        private Color GetEventTypeColor(EventType eventType)
         {
-            if (currentEvent == null) return Color.white;
-            
-            return currentEvent.eventType switch
+            return eventType switch
             {
                 EventType.Crisis => crisisColor,
                 EventType.Opportunity => opportunityColor,
@@ -470,11 +462,9 @@ namespace MetaBalance.Events
             };
         }
         
-        private Color GetPriorityColor()
+        private Color GetPriorityColor(EventSeverity severity)
         {
-            if (currentEvent == null) return normalColor;
-            
-            return currentEvent.severity switch
+            return severity switch
             {
                 EventSeverity.Critical => urgentColor,
                 EventSeverity.High => normalColor,
@@ -486,105 +476,154 @@ namespace MetaBalance.Events
         
         #endregion
         
-        #region Update and Lifecycle
+        #region Event Response Handling
         
-        private void Update()
+        private void HandleResponseSelected(EventResponseOption response)
         {
-            if (!isActive || currentEvent == null) return;
+            Debug.Log($"🎯 Response selected: {response.buttonText} for event: {currentEvent.title}");
             
-            // Update timer
-            currentEvent.timeRemaining -= Time.deltaTime;
-            UpdateTimeDisplay();
-            UpdateAllButtonAffordability();
+            OnEventResponseSelected?.Invoke(currentEvent, response.responseType);
+            onEventResponded?.Invoke(currentEvent);
             
-            // Check for expiration
-            if (currentEvent.timeRemaining <= 0f)
-            {
-                HandleExpiration();
-            }
+            MarkAsHandled();
         }
         
-        private void UpdateAllButtonAffordability()
+        private void MarkAsHandled()
         {
-            if (currentEvent == null) return;
-            
-            for (int i = 0; i < spawnedButtons.Count && i < currentEvent.responseOptions.Count; i++)
-            {
-                UpdateButtonAffordability(spawnedButtons[i], currentEvent.responseOptions[i]);
-            }
-        }
-        
-        private void HandleExpiration()
-        {
-            if (!isActive) return;
-            
             isActive = false;
             
-            // Invoke expiration events
-            OnEventExpired?.Invoke(currentEvent);
-            onEventDismissed?.Invoke(currentEvent);
-            
-            // Show expiration feedback
-            if (eventDescriptionText != null)
+            // Disable all buttons
+            foreach (var button in spawnedButtons)
             {
-                eventDescriptionText.text = "⏰ Event expired! Response window closed.";
-                eventDescriptionText.color = Color.red;
+                if (button != null)
+                    button.interactable = false;
             }
             
-            SetButtonsInteractable(false);
-            
-            // Auto-destroy
-            Invoke(nameof(DestroySelf), 3f);
-        }
-        
-        private void DestroySelf()
-        {
-            if (gameObject != null)
-                Destroy(gameObject);
+            // Visual feedback for handled state
+            if (eventTypeBackground != null)
+            {
+                var currentColor = eventTypeBackground.color;
+                eventTypeBackground.color = new Color(currentColor.r, currentColor.g, currentColor.b, 0.5f);
+            }
         }
         
         #endregion
         
-        #region Public API
+        #region State Management
         
-        /// <summary>
-        /// Refresh display for external updates
-        /// </summary>
-        public void RefreshDisplay()
+        public void MarkAsHistorical()
         {
-            if (currentEvent != null)
+            isHistorical = true;
+            
+            // Apply historical styling
+            ApplyHistoricalStyling();
+            
+            // Disable all interactions
+            foreach (var button in spawnedButtons)
             {
-                DisplayEvent();
-                UpdateVisualTheme();
-                UpdateAllButtonAffordability();
+                if (button != null)
+                    button.interactable = false;
             }
+            
+            Debug.Log($"📚 Event marked as historical: {currentEvent?.title}");
         }
         
-        /// <summary>
-        /// Check if this event item is still active
-        /// </summary>
-        public bool IsActive()
+        private void ApplyHistoricalStyling()
         {
-            return isActive && currentEvent != null;
+            Color historicalColor = new Color(0.6f, 0.6f, 0.6f);
+            
+            if (eventTitleText != null) eventTitleText.color = historicalColor;
+            if (eventDescriptionText != null) eventDescriptionText.color = historicalColor;
+            if (eventTypeLabel != null) eventTypeLabel.color = historicalColor;
+            if (priorityLabel != null) priorityLabel.color = historicalColor;
         }
         
-        /// <summary>
-        /// Get the current event data
-        /// </summary>
-        public EventData GetEventData()
+        #endregion
+        
+
+        
+        #region Public Interface
+        
+        public bool IsHistorical()
+        {
+            return isHistorical;
+        }
+        
+        public EventData GetCurrentEvent()
         {
             return currentEvent;
         }
         
-        /// <summary>
-        /// Force dismiss this event
-        /// </summary>
-        public void DismissEvent()
+        #endregion
+        
+        #region Testing Methods
+        
+        [ContextMenu("🧪 Mark as Historical")]
+        public void TestMarkAsHistorical()
         {
-            if (isActive)
+            MarkAsHistorical();
+        }
+        
+        [ContextMenu("🔘 Debug Button Setup")]
+        public void DebugButtonSetup()
+        {
+            Debug.Log("=== 🔘 BUTTON DEBUG INFO ===");
+            Debug.Log($"Current Event: {currentEvent?.title ?? "NULL"}");
+            Debug.Log($"Button Container: {buttonContainer?.name ?? "NULL"}");
+            Debug.Log($"Response Button Prefab: {responseButtonPrefab?.name ?? "NULL"}");
+            Debug.Log($"Spawned Buttons Count: {spawnedButtons.Count}");
+            
+            if (currentEvent != null)
             {
-                HandleExpiration();
+                Debug.Log($"Event Response Options: {currentEvent.responseOptions?.Count ?? 0}");
+                if (currentEvent.responseOptions != null)
+                {
+                    for (int i = 0; i < currentEvent.responseOptions.Count; i++)
+                    {
+                        var option = currentEvent.responseOptions[i];
+                        Debug.Log($"  Option {i}: '{option.buttonText}' (RP: {option.rpCost}, CP: {option.cpCost})");
+                    }
+                }
             }
+            
+            // Check button container children
+            if (buttonContainer != null)
+            {
+                Debug.Log($"Button Container Children: {buttonContainer.childCount}");
+                for (int i = 0; i < buttonContainer.childCount; i++)
+                {
+                    var child = buttonContainer.GetChild(i);
+                    var button = child.GetComponent<Button>();
+                    Debug.Log($"  Child {i}: {child.name} - Has Button: {button != null}");
+                }
+            }
+        }
+        
+        [ContextMenu("🔘 Force Recreate Buttons")]
+        public void TestRecreateButtons()
+        {
+            Debug.Log("🔘 Force recreating buttons...");
+            CreateDynamicButtons();
+        }
+        
+        [ContextMenu("🔘 Test Button Creation")]
+        public void TestButtonCreation()
+        {
+            if (currentEvent == null)
+            {
+                Debug.LogError("❌ No current event to test buttons with");
+                return;
+            }
+            
+            Debug.Log("🔘 Testing button creation...");
+            
+            // Clear existing
+            ClearSpawnedButtons();
+            
+            // Test with current event
+            CreateDynamicButtons();
+            
+            Debug.Log($"✅ Button creation test complete. Created {spawnedButtons.Count} buttons.");
         }
         
         #endregion

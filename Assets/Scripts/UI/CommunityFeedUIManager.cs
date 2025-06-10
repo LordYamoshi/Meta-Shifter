@@ -1,221 +1,268 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
-using TMPro;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace MetaBalance.UI
 {
     /// <summary>
-    /// FIXED Community Feed UI Manager - Compatible with Enhanced CommunityFeedbackManager
-    /// Removes all broken method calls and uses only the new enhanced API
+    /// Enhanced CommunityFeedUIManager that restricts community feed visibility to Feedback phase only
     /// </summary>
     public class CommunityFeedUIManager : MonoBehaviour
     {
-        [Header("Basic UI References")]
-        [SerializeField] private Transform communityFeedContainer;  // Your existing container
-        [SerializeField] private GameObject feedItemPrefab;         // Your existing prefab
-        [SerializeField] private int maxVisibleItems = 15;
+        [Header("Feed Components")]
+        [SerializeField] private GameObject feedItemPrefab;
+        [SerializeField] private Transform communityFeedContainer;
+        [SerializeField] private Transform viralFeedbackContainer;
+        [SerializeField] private ScrollRect feedScrollRect;
         
-        [Header("Tab Controls (Optional)")]
+        [Header("Tab System")]
         [SerializeField] private Button communityTabButton;
         [SerializeField] private Button eventsTabButton;
         [SerializeField] private GameObject communityFeedPanel;
         [SerializeField] private GameObject eventsPanel;
         
-        [Header("Enhanced Sentiment Display")]
-        [SerializeField] private TextMeshProUGUI sentimentText;
-        [SerializeField] private TextMeshProUGUI sentimentTrendText;  // NEW: Show trend
-        [SerializeField] private Slider sentimentSlider;
-        [SerializeField] private TextMeshProUGUI metaStabilityText;   // NEW: Meta stability
-        [SerializeField] private TextMeshProUGUI seasonInfoText;      // NEW: Season info
+        [Header("Phase Restriction UI")]
+        [SerializeField] private GameObject feedbackPhaseOnlyMessage;
+        [SerializeField] private Text phaseRestrictionText;
         
-        [Header("Enhanced Stats Display (Optional)")]
-        [SerializeField] private TextMeshProUGUI totalFeedbackText;   // NEW: Total feedback count
-        [SerializeField] private TextMeshProUGUI viralFeedbackText;   // NEW: Viral content count
-        [SerializeField] private Transform viralFeedbackContainer;    // NEW: Special viral section
+        [Header("Settings")]
+        [SerializeField] private int maxVisibleItems = 15;
+        [SerializeField] private bool showTimestamps = true;
         
-        // Simple lists to track active items
+        // State tracking
         private List<CommunityFeedItem> activeFeedItems = new List<CommunityFeedItem>();
-        private List<CommunityFeedItem> viralFeedItems = new List<CommunityFeedItem>();
         private bool showingCommunityFeed = true;
+        private bool isFeedbackPhase = false;
+        
+        #region Unity Lifecycle
         
         private void Start()
         {
-            SetupBasicUI();
-            SubscribeToEnhancedEvents();
+            InitializeUI();
+            SubscribeToEvents();
+            CheckCurrentPhase();
         }
         
-        private void SetupBasicUI()
+        private void InitializeUI()
         {
-            // Auto-find container if not assigned
-            if (communityFeedContainer == null)
-            {
-                var found = GameObject.Find("CommunityContent");
-                if (found != null)
-                    communityFeedContainer = found.transform;
-            }
-            
-            // Setup tab buttons if you have them
+            // Setup tab buttons
             if (communityTabButton != null)
                 communityTabButton.onClick.AddListener(() => SwitchToTab(true));
-            
+                
             if (eventsTabButton != null)
                 eventsTabButton.onClick.AddListener(() => SwitchToTab(false));
-                
-            // Start with community tab
+            
+            // Initialize with community tab
             SwitchToTab(true);
             
-            // Set initial sentiment
-            UpdateSentimentDisplay(65f);
-            UpdateEnhancedDisplays();
-            
-            Debug.Log("✅ Enhanced Community Feed UI Manager initialized");
+            // Setup phase restriction message
+            SetupPhaseRestrictionUI();
         }
         
-        private void SubscribeToEnhancedEvents()
+        private void SetupPhaseRestrictionUI()
         {
-            if (Community.CommunityFeedbackManager.Instance != null)
+            if (feedbackPhaseOnlyMessage != null)
             {
-                // FIXED: Use only methods that exist in the enhanced manager
-                Community.CommunityFeedbackManager.Instance.OnNewFeedbackAdded.AddListener(OnNewFeedbackReceived);
-                Community.CommunityFeedbackManager.Instance.OnCommunitySentimentChanged.AddListener(OnSentimentChanged);
-                
-                // NEW: Subscribe to enhanced events
-                Community.CommunityFeedbackManager.Instance.OnStrategyActivated.AddListener(OnStrategyActivated);
-                Community.CommunityFeedbackManager.Instance.OnViralFeedbackGenerated.AddListener(OnViralFeedbackGenerated);
-                
-                Debug.Log("📡 Subscribed to enhanced community feedback events");
-            }
-            else
-            {
-                Debug.LogWarning("⚠️ CommunityFeedbackManager.Instance not found - will retry in 1 second");
-                Invoke(nameof(SubscribeToEnhancedEvents), 1f);
-            }
-        }
-        
-        #region Enhanced Event Handlers
-        
-        private void OnNewFeedbackReceived(Community.CommunityFeedback feedback)
-        {
-            if (showingCommunityFeed)
-            {
-                AddFeedItem(feedback);
+                feedbackPhaseOnlyMessage.SetActive(false);
             }
             
-            // Update enhanced displays
-            UpdateEnhancedDisplays();
-        }
-        
-        private void OnSentimentChanged(float newSentiment)
-        {
-            UpdateSentimentDisplay(newSentiment);
-            UpdateSentimentTrend();
-        }
-        
-        private void OnStrategyActivated(string strategyInfo)
-        {
-            Debug.Log($"🎯 Strategy activated: {strategyInfo}");
-            // You can add visual feedback here if desired
-        }
-        
-        private void OnViralFeedbackGenerated(Community.FeedbackEventData eventData)
-        {
-            Debug.Log($"🌟 Viral feedback generated: {eventData.feedback.author} - {eventData.feedback.content}");
-            
-            // Add to viral section if you have one
-            if (viralFeedbackContainer != null)
+            if (phaseRestrictionText != null)
             {
-                AddViralFeedItem(eventData.feedback);
+                phaseRestrictionText.text = "Community feedback is only available during the Feedback Phase.\nCurrently in: " + GetCurrentPhaseDisplayName();
             }
-            
-            UpdateEnhancedDisplays();
         }
         
         #endregion
         
-        #region Feed Item Management
+        #region Event Subscription
+        
+        private void SubscribeToEvents()
+        {
+            // Subscribe to phase changes
+            if (Core.PhaseManager.Instance != null)
+            {
+                Core.PhaseManager.Instance.OnPhaseChanged.AddListener(OnPhaseChanged);
+                Debug.Log("📅 CommunityFeedUI subscribed to phase changes");
+            }
+            
+            // Subscribe to community feedback (but only process during feedback phase)
+            if (Community.CommunityFeedbackManager.Instance != null)
+            {
+                Community.CommunityFeedbackManager.Instance.OnNewFeedbackAdded.AddListener(OnNewFeedbackReceived);
+                Community.CommunityFeedbackManager.Instance.OnCommunitySentimentChanged.AddListener(UpdateSentimentDisplay);
+                Debug.Log("💬 CommunityFeedUI subscribed to feedback events");
+            }
+        }
+        
+        #endregion
+        
+        #region Phase Management
+        
+        private void OnPhaseChanged(Core.GamePhase newPhase)
+        {
+            bool wasFeedbackPhase = isFeedbackPhase;
+            isFeedbackPhase = (newPhase == Core.GamePhase.Feedback);
+            
+            Debug.Log($"🎭 CommunityFeedUI phase changed: {newPhase} - Feedback phase: {isFeedbackPhase}");
+            
+            // Update UI visibility based on phase
+            UpdateFeedVisibilityForPhase();
+            
+            // If we just entered feedback phase, refresh the feed
+            if (isFeedbackPhase && !wasFeedbackPhase)
+            {
+                RefreshFeedForFeedbackPhase();
+            }
+            
+            // If we left feedback phase, clear the feed
+            if (!isFeedbackPhase && wasFeedbackPhase)
+            {
+                ClearFeedItems();
+            }
+            
+            // Update phase restriction message
+            UpdatePhaseRestrictionMessage();
+        }
+        
+        private void CheckCurrentPhase()
+        {
+            if (Core.PhaseManager.Instance != null)
+            {
+                var currentPhase = Core.PhaseManager.Instance.GetCurrentPhase();
+                OnPhaseChanged(currentPhase);
+            }
+        }
+        
+        private void UpdateFeedVisibilityForPhase()
+        {
+            // Show/hide community feed based on phase
+            if (communityFeedPanel != null)
+            {
+                bool shouldShowFeed = isFeedbackPhase && showingCommunityFeed;
+                communityFeedContainer?.gameObject.SetActive(shouldShowFeed);
+            }
+            
+            // Show/hide phase restriction message
+            if (feedbackPhaseOnlyMessage != null)
+            {
+                bool shouldShowRestriction = !isFeedbackPhase && showingCommunityFeed;
+                feedbackPhaseOnlyMessage.SetActive(shouldShowRestriction);
+            }
+        }
+        
+        private void UpdatePhaseRestrictionMessage()
+        {
+            if (phaseRestrictionText != null)
+            {
+                string currentPhase = GetCurrentPhaseDisplayName();
+                if (isFeedbackPhase)
+                {
+                    phaseRestrictionText.text = "Community feedback is now available!";
+                }
+                else
+                {
+                    phaseRestrictionText.text = $"Community feedback is only available during the Feedback Phase.\nCurrently in: {currentPhase}";
+                }
+            }
+        }
+        
+        private string GetCurrentPhaseDisplayName()
+        {
+            if (Core.PhaseManager.Instance != null)
+            {
+                return Core.PhaseManager.Instance.GetPhaseDisplayName();
+            }
+            return "Unknown Phase";
+        }
+        
+        #endregion
+        
+        #region Feed Management
+        
+        private void OnNewFeedbackReceived(Community.CommunityFeedback feedback)
+        {
+            // Only add feedback items during feedback phase
+            if (isFeedbackPhase && showingCommunityFeed)
+            {
+                AddFeedItem(feedback);
+            }
+            else
+            {
+                Debug.Log($"📝 Feedback received but not in feedback phase - storing for later: {feedback.author}");
+                // Could store for later if needed
+            }
+        }
         
         private void AddFeedItem(Community.CommunityFeedback feedback)
         {
             if (feedItemPrefab == null || communityFeedContainer == null)
             {
-                Debug.LogError("Feed item prefab or container not assigned!");
+                Debug.LogError("❌ Feed item prefab or container not assigned!");
                 return;
             }
             
-            // Create new feed item using your prefab
+            if (!isFeedbackPhase)
+            {
+                Debug.LogWarning("⚠️ Attempted to add feed item outside of feedback phase");
+                return;
+            }
+            
+            // Create new feed item
             GameObject newItemObj = Instantiate(feedItemPrefab, communityFeedContainer);
             
-            // Get the CommunityFeedItem component
+            // Get or add CommunityFeedItem component
             var feedItem = newItemObj.GetComponent<CommunityFeedItem>();
             if (feedItem == null)
             {
-                Debug.LogWarning("Feed item prefab doesn't have CommunityFeedItem component - adding one");
+                Debug.LogWarning("⚠️ Feed item prefab missing CommunityFeedItem component - adding one");
                 feedItem = newItemObj.AddComponent<CommunityFeedItem>();
             }
             
-            // FIXED: Use the correct method name
+            // Setup the feed item
             feedItem.SetupWithProPlayerSupport(feedback);
             
-            // Add to our tracking list
+            // Track and position
             activeFeedItems.Insert(0, feedItem);
-            
-            // Move to top (your layout group should handle positioning)
             newItemObj.transform.SetAsFirstSibling();
             
-            // Highlight viral content
-            if (feedback.isViralCandidate)
-            {
-                HighlightViralContent(feedItem);
-            }
-            
-            // Remove old items if we have too many
+            // Remove excess items
             while (activeFeedItems.Count > maxVisibleItems)
             {
                 RemoveOldestFeedItem();
             }
             
-            Debug.Log($"✅ Added feed item: {feedback.author} ({feedback.feedbackType}) - Total items: {activeFeedItems.Count}");
+            Debug.Log($"✅ Added feed item (Feedback Phase): {feedback.author} - Total: {activeFeedItems.Count}");
         }
         
-        private void AddViralFeedItem(Community.CommunityFeedback feedback)
+        private void RefreshFeedForFeedbackPhase()
         {
-            if (viralFeedbackContainer == null) return;
+            Debug.Log("🔄 Refreshing community feed for feedback phase");
             
-            GameObject viralItemObj = Instantiate(feedItemPrefab, viralFeedbackContainer);
-            var feedItem = viralItemObj.GetComponent<CommunityFeedItem>();
-            
-            if (feedItem == null)
+            // Could request recent feedback from the manager
+            if (Community.CommunityFeedbackManager.Instance != null)
             {
-                feedItem = viralItemObj.AddComponent<CommunityFeedItem>();
+                // If your feedback manager has a method to get recent feedback, call it here
+                // var recentFeedback = Community.CommunityFeedbackManager.Instance.GetRecentFeedback();
+                // foreach (var feedback in recentFeedback)
+                // {
+                //     AddFeedItem(feedback);
+                // }
             }
-            
-            feedItem.SetupWithProPlayerSupport(feedback);
-            HighlightViralContent(feedItem);
-            
-            viralFeedItems.Insert(0, feedItem);
-            viralItemObj.transform.SetAsFirstSibling();
-            
-            // Limit viral items
-            while (viralFeedItems.Count > 5)
-            {
-                RemoveOldestViralItem();
-            }
-            
-            Debug.Log($"🌟 Added viral feed item: {feedback.author}");
         }
         
-        private void HighlightViralContent(CommunityFeedItem feedItem)
+        public void ClearFeedItems()
         {
-            // Add visual highlight for viral content
-            var background = feedItem.GetComponent<Image>();
-            if (background != null)
+            Debug.Log("🧹 Clearing community feed items (leaving feedback phase)");
+            
+            foreach (var item in activeFeedItems)
             {
-                background.color = new Color(1f, 0.8f, 0.2f, 0.3f); // Golden highlight
+                if (item != null && item.gameObject != null)
+                {
+                    Destroy(item.gameObject);
+                }
             }
             
-            // You could add a "🔥" icon or other visual indicator here
+            activeFeedItems.Clear();
         }
         
         private void RemoveOldestFeedItem()
@@ -231,19 +278,6 @@ namespace MetaBalance.UI
             }
         }
         
-        private void RemoveOldestViralItem()
-        {
-            if (viralFeedItems.Count == 0) return;
-            
-            var oldestItem = viralFeedItems[viralFeedItems.Count - 1];
-            viralFeedItems.RemoveAt(viralFeedItems.Count - 1);
-            
-            if (oldestItem != null && oldestItem.gameObject != null)
-            {
-                Destroy(oldestItem.gameObject);
-            }
-        }
-        
         #endregion
         
         #region Tab Management
@@ -252,315 +286,111 @@ namespace MetaBalance.UI
         {
             showingCommunityFeed = showCommunity;
             
-            // Update tab button colors if you have them
+            // Update tab button appearance
+            UpdateTabButtonAppearance();
+            
+            // Update panel visibility
+            UpdatePanelVisibility();
+            
+            // Update feed visibility based on phase
+            UpdateFeedVisibilityForPhase();
+            
+            Debug.Log($"🔄 Switched to {(showCommunity ? "Community" : "Events")} tab");
+        }
+        
+        private void UpdateTabButtonAppearance()
+        {
             if (communityTabButton != null)
             {
                 var colors = communityTabButton.colors;
-                colors.normalColor = showCommunity ? Color.white : new Color(0.7f, 0.7f, 0.7f);
+                colors.normalColor = showingCommunityFeed ? Color.white : new Color(0.7f, 0.7f, 0.7f);
                 communityTabButton.colors = colors;
             }
             
             if (eventsTabButton != null)
             {
                 var colors = eventsTabButton.colors;
-                colors.normalColor = !showCommunity ? Color.white : new Color(0.7f, 0.7f, 0.7f);
+                colors.normalColor = !showingCommunityFeed ? Color.white : new Color(0.7f, 0.7f, 0.7f);
                 eventsTabButton.colors = colors;
             }
-            
-            // Show/hide panels if you have them
+        }
+        
+        private void UpdatePanelVisibility()
+        {
             if (communityFeedPanel != null)
-                communityFeedPanel.SetActive(showCommunity);
+                communityFeedPanel.SetActive(showingCommunityFeed);
                 
             if (eventsPanel != null)
-                eventsPanel.SetActive(!showCommunity);
-            
-            // Load existing feedback when switching to community tab
-            if (showCommunity)
-            {
-                LoadExistingFeedback();
-            }
-        }
-        
-        private void LoadExistingFeedback()
-        {
-            // Clear current items
-            ClearFeedItems();
-            
-            // FIXED: Use the enhanced API method
-            var feedbackManager = Community.CommunityFeedbackManager.Instance;
-            if (feedbackManager != null)
-            {
-                var existingFeedback = feedbackManager.GetActiveFeedback();
-                
-                foreach (var feedback in existingFeedback.Take(maxVisibleItems))
-                {
-                    AddFeedItem(feedback);
-                }
-                
-                Debug.Log($"📋 Loaded {existingFeedback.Count} existing feedback items");
-            }
-        }
-        
-        private void ClearFeedItems()
-        {
-            foreach (var item in activeFeedItems)
-            {
-                if (item != null && item.gameObject != null)
-                {
-                    Destroy(item.gameObject);
-                }
-            }
-            activeFeedItems.Clear();
-            
-            foreach (var item in viralFeedItems)
-            {
-                if (item != null && item.gameObject != null)
-                {
-                    Destroy(item.gameObject);
-                }
-            }
-            viralFeedItems.Clear();
+                eventsPanel.SetActive(!showingCommunityFeed);
         }
         
         #endregion
         
-        #region Enhanced Display Updates
+        #region Sentiment Display
         
         private void UpdateSentimentDisplay(float sentiment)
         {
-            if (sentimentSlider != null)
-                sentimentSlider.value = sentiment / 100f;
-                
-            if (sentimentText != null)
+            // Only update sentiment display during feedback phase
+            if (!isFeedbackPhase)
             {
-                sentimentText.text = $"{sentiment:F1}%";
-                sentimentText.color = GetSentimentColor(sentiment);
-            }
-        }
-        
-        private void UpdateSentimentTrend()
-        {
-            var feedbackManager = Community.CommunityFeedbackManager.Instance;
-            if (feedbackManager == null || sentimentTrendText == null) return;
-            
-            float trend = feedbackManager.GetSentimentTrend();
-            
-            if (Mathf.Abs(trend) < 0.1f)
-            {
-                sentimentTrendText.text = "→ Stable";
-                sentimentTrendText.color = Color.gray;
-            }
-            else if (trend > 0)
-            {
-                sentimentTrendText.text = $"↗ +{trend:F1}%";
-                sentimentTrendText.color = Color.green;
-            }
-            else
-            {
-                sentimentTrendText.text = $"↘ {trend:F1}%";
-                sentimentTrendText.color = Color.red;
-            }
-        }
-        
-        private void UpdateEnhancedDisplays()
-        {
-            var feedbackManager = Community.CommunityFeedbackManager.Instance;
-            if (feedbackManager == null) return;
-            
-            // Update meta stability
-            if (metaStabilityText != null)
-            {
-                float stability = feedbackManager.GetMetaStabilityScore();
-                metaStabilityText.text = $"Meta: {stability:F0}%";
-                metaStabilityText.color = GetStabilityColor(stability);
+                Debug.Log($"📊 Sentiment update received but not in feedback phase: {sentiment:F1}");
+                return;
             }
             
-            // Update season info
-            if (seasonInfoText != null)
-            {
-                string seasonInfo = "";
-                if (feedbackManager.IsRankedSeason()) seasonInfo += "🏆 Ranked ";
-                if (feedbackManager.IsTournamentSeason()) seasonInfo += "🎯 Tournament ";
-                if (string.IsNullOrEmpty(seasonInfo)) seasonInfo = "📅 Off-Season";
-                
-                seasonInfoText.text = seasonInfo.Trim();
-            }
-            
-            // Update feedback counts
-            if (totalFeedbackText != null)
-            {
-                int activeCount = feedbackManager.GetActiveFeedback().Count;
-                totalFeedbackText.text = $"Total: {activeCount}";
-            }
-            
-            if (viralFeedbackText != null)
-            {
-                int viralCount = feedbackManager.GetViralFeedback().Count;
-                viralFeedbackText.text = $"Viral: {viralCount}";
-            }
+            Debug.Log($"📊 Updating sentiment display: {sentiment:F1}");
+            // Your existing sentiment display logic here
         }
         
         #endregion
         
-        #region Utility Methods
+        #region Testing Methods
         
-        private Color GetSentimentColor(float sentiment)
+        [ContextMenu("🧪 Test Phase Restriction")]
+        public void TestPhaseRestriction()
         {
-            return sentiment switch
+            Debug.Log("🧪 Testing phase restriction...");
+            
+            // Force different phases for testing
+            if (Core.PhaseManager.Instance != null)
             {
-                >= 70f => new Color(0.2f, 0.8f, 0.2f),    // Green
-                >= 40f => Color.Lerp(Color.gray, new Color(0.2f, 0.8f, 0.2f), (sentiment - 40f) / 30f),
-                >= 30f => Color.gray,                      // Gray
-                _ => Color.Lerp(Color.gray, new Color(0.8f, 0.2f, 0.2f), (30f - sentiment) / 30f)   // Red
-            };
+                var currentPhase = Core.PhaseManager.Instance.GetCurrentPhase();
+                Debug.Log($"Current phase: {currentPhase}");
+                Debug.Log($"Is feedback phase: {isFeedbackPhase}");
+                Debug.Log($"Feed visibility: {communityFeedContainer?.gameObject.activeSelf}");
+            }
         }
         
-        private Color GetStabilityColor(float stability)
+        [ContextMenu("🧪 Force Feedback Phase")]
+        public void TestForceFeedbackPhase()
         {
-            return stability switch
-            {
-                >= 75f => Color.green,
-                >= 50f => Color.yellow,
-                >= 25f => new Color(1f, 0.5f, 0f), // Orange
-                _ => Color.red
-            };
+            OnPhaseChanged(Core.GamePhase.Feedback);
+        }
+        
+        [ContextMenu("🧪 Force Planning Phase")]
+        public void TestForcePlanningPhase()
+        {
+            OnPhaseChanged(Core.GamePhase.Planning);
         }
         
         #endregion
         
-        #region Enhanced Test Methods
-        
-        [ContextMenu("🧪 Test Enhanced Pro Player Feedback")]
-        public void TestEnhancedProPlayerFeedback()
-        {
-            var testFeedback = new Community.CommunityFeedback
-            {
-                author = "TSM_Legend",
-                content = "Finally! Warrior feels balanced now ★ These health changes improve competitive diversity",
-                sentiment = 0.8f,
-                feedbackType = Community.FeedbackType.ProPlayerOpinion,
-                communitySegment = "Pro Players",
-                timestamp = System.DateTime.Now,
-                upvotes = 95,
-                replies = 28,
-                isViralCandidate = true,
-                impactScore = 2.5f
-            };
-            
-            AddFeedItem(testFeedback);
-            Debug.Log("🧪 Added enhanced pro player test feedback");
-        }
-        
-        [ContextMenu("🌟 Test Viral Content Creator Feedback")]
-        public void TestViralContentCreatorFeedback()
-        {
-            var testFeedback = new Community.CommunityFeedback
-            {
-                author = "GameGuruYT",
-                content = "MASSIVE patch analysis coming! ▲ These changes will reshape the entire meta",
-                sentiment = 0.9f,
-                feedbackType = Community.FeedbackType.ContentCreator,
-                communitySegment = "Content Creators",
-                timestamp = System.DateTime.Now,
-                upvotes = 187,
-                replies = 56,
-                isViralCandidate = true,
-                impactScore = 3.2f
-            };
-            
-            AddFeedItem(testFeedback);
-            if (viralFeedbackContainer != null)
-            {
-                AddViralFeedItem(testFeedback);
-            }
-            
-            Debug.Log("🌟 Added viral content creator test feedback");
-        }
-        
-        [ContextMenu("📊 Test Enhanced UI Updates")]
-        public void TestEnhancedUIUpdates()
-        {
-            UpdateSentimentDisplay(72.5f);
-            UpdateSentimentTrend();
-            UpdateEnhancedDisplays();
-            
-            Debug.Log("📊 Tested all enhanced UI updates");
-        }
-        
-        [ContextMenu("🔄 Refresh From Enhanced Manager")]
-        public void RefreshFromEnhancedManager()
-        {
-            var feedbackManager = Community.CommunityFeedbackManager.Instance;
-            if (feedbackManager != null)
-            {
-                // Update sentiment
-                float sentiment = feedbackManager.GetCommunitySentiment();
-                UpdateSentimentDisplay(sentiment);
-                
-                // Update all enhanced displays
-                UpdateEnhancedDisplays();
-                
-                // Reload feedback
-                LoadExistingFeedback();
-                
-                Debug.Log($"🔄 Refreshed UI from enhanced manager - Sentiment: {sentiment:F1}%");
-            }
-            else
-            {
-                Debug.LogError("❌ Enhanced CommunityFeedbackManager not found!");
-            }
-        }
-        
-        [ContextMenu("🧹 Clear All Enhanced Items")]
-        public void ClearAllEnhancedItems()
-        {
-            ClearFeedItems();
-            Debug.Log("🧹 Cleared all enhanced feed items");
-        }
-        
-        [ContextMenu("📋 Show Enhanced Debug Info")]
-        public void ShowEnhancedDebugInfo()
-        {
-            var feedbackManager = Community.CommunityFeedbackManager.Instance;
-            
-            Debug.Log("=== 📋 ENHANCED UI DEBUG INFO ===");
-            Debug.Log($"Community Container: {communityFeedContainer?.name ?? "NULL"}");
-            Debug.Log($"Feed Item Prefab: {feedItemPrefab?.name ?? "NULL"}");
-            Debug.Log($"Active Feed Items: {activeFeedItems.Count}");
-            Debug.Log($"Viral Feed Items: {viralFeedItems.Count}");
-            Debug.Log($"Max Visible Items: {maxVisibleItems}");
-            Debug.Log($"Showing Community Feed: {showingCommunityFeed}");
-            
-            if (feedbackManager != null)
-            {
-                Debug.Log($"Manager Active Feedback: {feedbackManager.GetActiveFeedback().Count}");
-                Debug.Log($"Manager Viral Feedback: {feedbackManager.GetViralFeedback().Count}");
-                Debug.Log($"Current Sentiment: {feedbackManager.GetCommunitySentiment():F1}%");
-                Debug.Log($"Sentiment Trend: {feedbackManager.GetSentimentTrend():F2}");
-                Debug.Log($"Meta Stability: {feedbackManager.GetMetaStabilityScore():F1}%");
-                Debug.Log($"Is Ranked Season: {feedbackManager.IsRankedSeason()}");
-                Debug.Log($"Is Tournament Season: {feedbackManager.IsTournamentSeason()}");
-            }
-            else
-            {
-                Debug.Log("❌ Enhanced CommunityFeedbackManager not found!");
-            }
-        }
-        
-        #endregion
+        #region Cleanup
         
         private void OnDestroy()
         {
-            // Clean up subscriptions
+            // Unsubscribe from events
+            if (Core.PhaseManager.Instance != null)
+            {
+                Core.PhaseManager.Instance.OnPhaseChanged.RemoveListener(OnPhaseChanged);
+            }
+            
             if (Community.CommunityFeedbackManager.Instance != null)
             {
                 Community.CommunityFeedbackManager.Instance.OnNewFeedbackAdded.RemoveListener(OnNewFeedbackReceived);
-                Community.CommunityFeedbackManager.Instance.OnCommunitySentimentChanged.RemoveListener(OnSentimentChanged);
-                Community.CommunityFeedbackManager.Instance.OnStrategyActivated.RemoveListener(OnStrategyActivated);
-                Community.CommunityFeedbackManager.Instance.OnViralFeedbackGenerated.RemoveListener(OnViralFeedbackGenerated);
+                Community.CommunityFeedbackManager.Instance.OnCommunitySentimentChanged.RemoveListener(UpdateSentimentDisplay);
             }
-            
-            Debug.Log("🎭 Enhanced Community Feed UI Manager destroyed and cleaned up");
         }
+        
+        #endregion
     }
 }

@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine.Events;
@@ -215,11 +216,6 @@ namespace MetaBalance.Community
             
             Debug.Log($"📊 Enhanced stat change tracked: {character} {stat} {previousValue:F1} → {newValue:F1}");
             
-            // Immediate feedback for significant changes
-            if (change.magnitude > 15f)
-            {
-                GenerateImmediateFeedback(change);
-            }
         }
         
         private void OnEnhancedOverallBalanceChanged(float newBalance)
@@ -660,35 +656,6 @@ namespace MetaBalance.Community
             if (isRankedSeason && overallBalance < 60f) baseSentiment -= 8f; // Frustration during ranked with poor balance
             
             return Mathf.Clamp(baseSentiment, 15f, 85f);
-        }
-        
-        private void GenerateImmediateFeedback(BalanceChange change)
-        {
-            // Generate immediate reaction for very significant changes
-            var immediateStrategies = feedbackStrategies.Values
-                .Where(s => s.ShouldApply(new List<BalanceChange> { change }, currentCommunitySentiment))
-                .Take(2); // Limit to 2 immediate reactions
-            
-            var immediateFeedback = new List<CommunityFeedback>();
-            
-            foreach (var strategy in immediateStrategies)
-            {
-                if (Random.Range(0f, 1f) < 0.6f) // 60% chance for immediate reaction
-                {
-                    var feedback = strategy.GenerateFeedback(new List<BalanceChange> { change }, currentCommunitySentiment, communitySegments);
-                    if (feedback != null)
-                    {
-                        feedback.content = "🚨 IMMEDIATE: " + feedback.content; // Mark as immediate
-                        immediateFeedback.Add(feedback);
-                    }
-                }
-            }
-            
-            if (immediateFeedback.Count > 0)
-            {
-                ProcessAndFinalizeFeedback(immediateFeedback);
-                Debug.Log($"⚡ Generated {immediateFeedback.Count} immediate reactions to major {change.character} {change.stat} change");
-            }
         }
         
         #endregion
