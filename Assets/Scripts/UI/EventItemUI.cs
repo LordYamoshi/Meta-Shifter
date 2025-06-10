@@ -3,44 +3,49 @@ using UnityEngine.UI;
 using TMPro;
 using System.Collections.Generic;
 using UnityEngine.Events;
+using System;
 
 namespace MetaBalance.Events
 {
     /// <summary>
-    /// Complete Event UI Item - Handles display and interaction for game events
-    /// Integrates with your existing community feedback and resource systems
-    /// Uses Strategy Pattern for different event response types
+    /// Beautiful Event UI Item that matches your stunning multi-card design!
+    /// Supports dynamic button creation based on event response options
     /// </summary>
     public class EventUIItem : MonoBehaviour
     {
-        [Header("Event Display")]
+        [Header("Main Event Display")]
         [SerializeField] private TextMeshProUGUI eventTitleText;
         [SerializeField] private TextMeshProUGUI eventDescriptionText;
         [SerializeField] private TextMeshProUGUI expectedImpactText;
         [SerializeField] private TextMeshProUGUI responseWindowText;
-        [SerializeField] private Image eventTypeIcon;
-        [SerializeField] private Image urgencyIndicator;
+        
+        [Header("Event Type & Priority")]
+        [SerializeField] private TextMeshProUGUI eventTypeLabel; // "CRISIS EVENT", "OPPORTUNITY", etc.
+        [SerializeField] private TextMeshProUGUI priorityLabel;   // "URGENT", "NORMAL", "LOW PRIORITY"
+        [SerializeField] private Image eventTypeBackground;     // Background color for event type
+        [SerializeField] private Image priorityIndicator;       // Priority indicator color
+        
+        [Header("Expected Impact/Benefits Section")]
+        [SerializeField] private TextMeshProUGUI impactSectionTitle; // "EXPECTED IMPACT", "POTENTIAL BENEFITS", etc.
+        [SerializeField] private Transform impactListContainer; // Container for impact bullet points
+        [SerializeField] private GameObject impactItemPrefab;  // Prefab for each impact item
         
         [Header("Response Buttons")]
-        [SerializeField] private Button emergencyFixButton;
-        [SerializeField] private Button communityManagementButton;
-        [SerializeField] private Button observeAndLearnButton;
-        [SerializeField] private Button customResponseButton; // For flexible responses
+        [SerializeField] private Transform buttonContainer; // Container where buttons will be spawned
+        [SerializeField] private GameObject responseButtonPrefab; // Prefab for response buttons
         
-        [Header("Button Text & Costs")]
-        [SerializeField] private TextMeshProUGUI emergencyFixText;
-        [SerializeField] private TextMeshProUGUI emergencyFixCost;
-        [SerializeField] private TextMeshProUGUI communityManagementText;
-        [SerializeField] private TextMeshProUGUI communityManagementCost;
-        [SerializeField] private TextMeshProUGUI observeText;
-        [SerializeField] private TextMeshProUGUI customResponseText;
-        [SerializeField] private TextMeshProUGUI customResponseCost;
+        [Header("Timer Display")]
+        [SerializeField] private TextMeshProUGUI timerText; // "2 turns remaining", "4 turns remaining"
+        [SerializeField] private Image timerIcon; // Clock icon
         
-        [Header("Visual Feedback")]
-        [SerializeField] private Color crisisColor = Color.red;
-        [SerializeField] private Color opportunityColor = Color.green;
-        [SerializeField] private Color neutralColor = Color.blue;
-        [SerializeField] private Color urgentColor = Color.yellow;
+        [Header("Visual Styling")]
+        [SerializeField] private Color crisisColor = new Color(0.8f, 0.2f, 0.2f);
+        [SerializeField] private Color opportunityColor = new Color(0.2f, 0.6f, 0.9f);
+        [SerializeField] private Color communityColor = new Color(0.3f, 0.8f, 0.6f);
+        [SerializeField] private Color tournamentColor = new Color(0.9f, 0.7f, 0.2f);
+        [SerializeField] private Color urgentColor = new Color(0.9f, 0.1f, 0.1f);
+        [SerializeField] private Color normalColor = new Color(0.4f, 0.6f, 0.8f);
+        [SerializeField] private Color lowPriorityColor = new Color(0.3f, 0.7f, 0.3f);
         
         [Header("Events")]
         public UnityEvent<EventData, EventResponseType> OnEventResponseSelected;
@@ -48,634 +53,540 @@ namespace MetaBalance.Events
         public UnityEvent<EventData> OnEventExpired;
         
         private EventData currentEvent;
-        private float timeRemaining;
-        private bool isActive = false;
+        private System.Action<EventData> onEventResponded;
+        private System.Action<EventData> onEventDismissed;
+        private List<Button> spawnedButtons = new List<Button>();
+        private List<GameObject> spawnedImpactItems = new List<GameObject>();
+        private bool isActive = true;
         
-        private void Start()
-        {
-            SetupButtonListeners();
-        }
-        
-        private void Update()
-        {
-            if (isActive && currentEvent != null)
-            {
-                UpdateTimer();
-            }
-        }
-        
-        #region Public Interface
+        #region Setup and Display
         
         /// <summary>
-        /// Display an event with full UI setup
+        /// Setup event with data and callbacks
+        /// </summary>
+        public void SetupEvent(EventData eventData, System.Action<EventData> respondedCallback, System.Action<EventData> dismissedCallback)
+        {
+            currentEvent = eventData;
+            onEventResponded = respondedCallback;
+            onEventDismissed = dismissedCallback;
+            isActive = true;
+            
+            DisplayEvent();
+            CreateDynamicButtons();
+            CreateImpactList();
+            UpdateVisualTheme();
+            
+            OnEventDisplayed?.Invoke(eventData);
+        }
+        
+        /// <summary>
+        /// Alternative setup method for compatibility
         /// </summary>
         public void DisplayEvent(EventData eventData)
         {
-            currentEvent = eventData;
-            isActive = true;
-            timeRemaining = eventData.responseTimeLimit;
-            
-            UpdateEventDisplay();
-            UpdateResponseOptions();
-            UpdateButtonAffordability();
-            
-            OnEventDisplayed.Invoke(eventData);
-            
-            Debug.Log($"🎭 Displaying event: {eventData.eventTitle}");
+            SetupEvent(eventData, null, null);
         }
         
-        /// <summary>
-        /// Refresh the event display (useful for resource changes)
-        /// </summary>
-        public void RefreshDisplay()
+        private void DisplayEvent()
         {
-            if (currentEvent != null)
+            if (currentEvent == null) return;
+            
+            // Main text content
+            UpdateText(eventTitleText, currentEvent.title);
+            UpdateText(eventDescriptionText, currentEvent.description);
+            
+            // Event type and priority labels
+            UpdateText(eventTypeLabel, GetEventTypeText(currentEvent.eventType));
+            UpdateText(priorityLabel, GetPriorityText(currentEvent.severity));
+            
+            // Impact section title
+            UpdateText(impactSectionTitle, GetImpactSectionTitle(currentEvent.eventType));
+            
+            UpdateTimeDisplay();
+        }
+        
+        private string GetEventTypeText(EventType eventType)
+        {
+            return eventType switch
             {
-                UpdateButtonAffordability();
-                UpdateTimer();
-            }
+                EventType.Crisis => "CRISIS EVENT",
+                EventType.Opportunity => "OPPORTUNITY",
+                EventType.Community => "COMMUNITY EVENT",
+                EventType.Technical => "TECHNICAL EVENT",
+                EventType.Competitive => "TOURNAMENT EVENT",
+                EventType.Special => "SPECIAL EVENT",
+                _ => "EVENT"
+            };
         }
         
-        /// <summary>
-        /// Close/dismiss the event
-        /// </summary>
-        public void CloseEvent()
+        private string GetPriorityText(EventSeverity severity)
         {
-            isActive = false;
-            currentEvent = null;
-            gameObject.SetActive(false);
+            return severity switch
+            {
+                EventSeverity.Critical => "URGENT",
+                EventSeverity.High => "NORMAL",
+                EventSeverity.Medium => "NORMAL", 
+                EventSeverity.Low => "LOW PRIORITY",
+                _ => "NORMAL"
+            };
+        }
+        
+        private string GetImpactSectionTitle(EventType eventType)
+        {
+            return eventType switch
+            {
+                EventType.Crisis => "EXPECTED IMPACT",
+                EventType.Opportunity => "POTENTIAL BENEFITS",
+                EventType.Community => "POTENTIAL OUTCOMES",
+                EventType.Competitive => "META ANALYSIS",
+                _ => "EXPECTED IMPACT"
+            };
+        }
+        
+        private void UpdateText(TextMeshProUGUI textComponent, string text)
+        {
+            if (textComponent != null)
+                textComponent.text = text;
+        }
+        
+        private void UpdateTimeDisplay()
+        {
+            if (timerText != null && currentEvent != null)
+            {
+                int turns = Mathf.CeilToInt(currentEvent.timeRemaining / 30f); // Convert seconds to turns
+                timerText.text = $"{turns} turns remaining";
+                
+                // Color code based on urgency
+                if (turns <= 1)
+                    timerText.color = Color.red;
+                else if (turns <= 2)
+                    timerText.color = Color.yellow;
+                else
+                    timerText.color = Color.white;
+            }
         }
         
         #endregion
         
-        #region Display Updates
+        #region Dynamic Button Creation
         
-        private void UpdateEventDisplay()
+        private void CreateDynamicButtons()
         {
-            if (currentEvent == null) return;
+            if (currentEvent == null || buttonContainer == null || responseButtonPrefab == null) return;
             
-            // Update main text content
-            if (eventTitleText != null)
-                eventTitleText.text = currentEvent.eventTitle;
-                
-            if (eventDescriptionText != null)
-                eventDescriptionText.text = currentEvent.description;
-                
-            if (expectedImpactText != null)
-                expectedImpactText.text = FormatExpectedImpact(currentEvent.expectedImpacts);
+            // Clear existing buttons
+            ClearSpawnedButtons();
             
-            // Update visual elements
-            UpdateEventTypeVisuals();
-            UpdateUrgencyVisuals();
-        }
-        
-        private void UpdateResponseOptions()
-        {
-            if (currentEvent == null) return;
-            
-            // Emergency Fix Button
-            if (emergencyFixButton != null && currentEvent.responses.ContainsKey(EventResponseType.EmergencyFix))
+            // Create buttons based on event's response options
+            foreach (var responseOption in currentEvent.responseOptions)
             {
-                var response = currentEvent.responses[EventResponseType.EmergencyFix];
-                emergencyFixButton.gameObject.SetActive(true);
-                
-                if (emergencyFixText != null)
-                    emergencyFixText.text = response.responseText;
-                if (emergencyFixCost != null)
-                    emergencyFixCost.text = FormatCost(response.rpCost, response.cpCost);
-            }
-            else if (emergencyFixButton != null)
-            {
-                emergencyFixButton.gameObject.SetActive(false);
+                CreateResponseButton(responseOption);
             }
             
-            // Community Management Button
-            if (communityManagementButton != null && currentEvent.responses.ContainsKey(EventResponseType.CommunityManagement))
+            // Add default "Observe & Learn" option if no responses exist
+            if (currentEvent.responseOptions.Count == 0)
             {
-                var response = currentEvent.responses[EventResponseType.CommunityManagement];
-                communityManagementButton.gameObject.SetActive(true);
-                
-                if (communityManagementText != null)
-                    communityManagementText.text = response.responseText;
-                if (communityManagementCost != null)
-                    communityManagementCost.text = FormatCost(response.rpCost, response.cpCost);
-            }
-            else if (communityManagementButton != null)
-            {
-                communityManagementButton.gameObject.SetActive(false);
-            }
-            
-            // Observe and Learn Button (usually free)
-            if (observeAndLearnButton != null && currentEvent.responses.ContainsKey(EventResponseType.ObserveAndLearn))
-            {
-                var response = currentEvent.responses[EventResponseType.ObserveAndLearn];
-                observeAndLearnButton.gameObject.SetActive(true);
-                
-                if (observeText != null)
-                    observeText.text = response.responseText;
-            }
-            else if (observeAndLearnButton != null)
-            {
-                observeAndLearnButton.gameObject.SetActive(false);
-            }
-            
-            // Custom Response Button (flexible for special events)
-            UpdateCustomResponseButton();
-        }
-        
-        private void UpdateCustomResponseButton()
-        {
-            if (customResponseButton == null) return;
-            
-            // Check for custom response types
-            var customResponses = new List<EventResponseType>
-            {
-                EventResponseType.IgnoreEvent,
-                EventResponseType.DelayResponse,
-                EventResponseType.SeekAdvice,
-                EventResponseType.CustomAction
-            };
-            
-            EventResponse foundCustomResponse = null;
-            EventResponseType foundType = EventResponseType.ObserveAndLearn;
-            
-            foreach (var responseType in customResponses)
-            {
-                if (currentEvent.responses.ContainsKey(responseType))
-                {
-                    foundCustomResponse = currentEvent.responses[responseType];
-                    foundType = responseType;
-                    break;
-                }
-            }
-            
-            if (foundCustomResponse != null)
-            {
-                customResponseButton.gameObject.SetActive(true);
-                
-                if (customResponseText != null)
-                    customResponseText.text = foundCustomResponse.responseText;
-                if (customResponseCost != null)
-                    customResponseCost.text = FormatCost(foundCustomResponse.rpCost, foundCustomResponse.cpCost);
-                    
-                // Store the response type for the button click
-                customResponseButton.onClick.RemoveAllListeners();
-                customResponseButton.onClick.AddListener(() => RespondToEvent(foundType));
-            }
-            else
-            {
-                customResponseButton.gameObject.SetActive(false);
+                CreateDefaultObserveButton();
             }
         }
         
-        private void UpdateButtonAffordability()
+        private void CreateResponseButton(EventResponseOption responseOption)
         {
-            var resourceManager = Core.ResourceManager.Instance;
-            if (resourceManager == null || currentEvent == null) return;
+            GameObject buttonObj = Instantiate(responseButtonPrefab, buttonContainer);
+            Button button = buttonObj.GetComponent<Button>();
             
-            // Emergency Fix Button
-            UpdateButtonAffordability(emergencyFixButton, EventResponseType.EmergencyFix, resourceManager);
+            if (button == null) return;
             
-            // Community Management Button
-            UpdateButtonAffordability(communityManagementButton, EventResponseType.CommunityManagement, resourceManager);
+            // Setup button appearance
+            SetupButtonVisuals(button, responseOption);
             
-            // Observe button is usually always affordable (free)
-            if (observeAndLearnButton != null)
+            // Setup button functionality
+            button.onClick.RemoveAllListeners();
+            button.onClick.AddListener(() => HandleResponse(responseOption.responseType));
+            
+            // Check affordability
+            UpdateButtonAffordability(button, responseOption);
+            
+            spawnedButtons.Add(button);
+        }
+        
+        private void SetupButtonVisuals(Button button, EventResponseOption responseOption)
+        {
+            // Find text components in button
+            var buttonTexts = button.GetComponentsInChildren<TextMeshProUGUI>();
+            
+            if (buttonTexts.Length >= 1)
             {
-                observeAndLearnButton.interactable = true;
-                SetButtonAffordabilityVisuals(observeAndLearnButton, true);
+                // Main button text
+                buttonTexts[0].text = responseOption.buttonText;
             }
             
-            // Custom Response Button
-            UpdateCustomButtonAffordability(resourceManager);
-        }
-        
-        private void UpdateButtonAffordability(Button button, EventResponseType responseType, Core.ResourceManager resourceManager)
-        {
-            if (button == null || !currentEvent.responses.ContainsKey(responseType)) return;
-            
-            var response = currentEvent.responses[responseType];
-            bool canAfford = resourceManager.CanSpend(response.rpCost, response.cpCost);
-            
-            button.interactable = canAfford;
-            SetButtonAffordabilityVisuals(button, canAfford);
-        }
-        
-        private void UpdateCustomButtonAffordability(Core.ResourceManager resourceManager)
-        {
-            if (customResponseButton == null || !customResponseButton.gameObject.activeSelf) return;
-            
-            // Find the active custom response
-            var customResponses = new[] { EventResponseType.IgnoreEvent, EventResponseType.DelayResponse, EventResponseType.SeekAdvice, EventResponseType.CustomAction };
-            
-            foreach (var responseType in customResponses)
+            if (buttonTexts.Length >= 2)
             {
-                if (currentEvent.responses.ContainsKey(responseType))
-                {
-                    var response = currentEvent.responses[responseType];
-                    bool canAfford = resourceManager.CanSpend(response.rpCost, response.cpCost);
-                    
-                    customResponseButton.interactable = canAfford;
-                    SetButtonAffordabilityVisuals(customResponseButton, canAfford);
-                    break;
-                }
+                // Cost text
+                buttonTexts[1].text = responseOption.GetCostText();
             }
-        }
-        
-        private void SetButtonAffordabilityVisuals(Button button, bool canAfford)
-        {
+            
+            // Set button color
             var buttonImage = button.GetComponent<Image>();
             if (buttonImage != null)
             {
-                buttonImage.color = canAfford ? Color.white : new Color(1f, 1f, 1f, 0.6f);
-            }
-            
-            // Update text colors for cost displays
-            var textComponents = button.GetComponentsInChildren<TextMeshProUGUI>();
-            foreach (var text in textComponents)
-            {
-                if (text.name.ToLower().Contains("cost"))
-                {
-                    text.color = canAfford ? Color.white : Color.red;
-                }
+                buttonImage.color = GetButtonColor(responseOption.responseType);
             }
         }
         
-        private void UpdateTimer()
+        private Color GetButtonColor(EventResponseType responseType)
         {
-            if (currentEvent == null) return;
-            
-            timeRemaining -= Time.deltaTime;
-            
-            if (responseWindowText != null)
+            return responseType switch
             {
-                if (timeRemaining > 0)
-                {
-                    responseWindowText.text = $"Response Window: {timeRemaining:F1}s";
-                    
-                    // Update urgency color based on time remaining
-                    if (timeRemaining < currentEvent.responseTimeLimit * 0.3f) // Last 30%
-                    {
-                        responseWindowText.color = urgentColor;
-                    }
-                    else if (timeRemaining < currentEvent.responseTimeLimit * 0.6f) // Last 60%
-                    {
-                        responseWindowText.color = Color.yellow;
-                    }
-                    else
-                    {
-                        responseWindowText.color = Color.white;
-                    }
-                }
-                else
-                {
-                    responseWindowText.text = "Time Expired!";
-                    responseWindowText.color = Color.red;
-                    ExpireEvent();
-                }
-            }
+                EventResponseType.EmergencyFix => new Color(0.7f, 0.3f, 0.9f), // Purple for hotfix
+                EventResponseType.CommunityManagement => new Color(0.2f, 0.6f, 0.9f), // Blue for promotion
+                EventResponseType.CustomResponse => new Color(0.9f, 0.6f, 0.2f), // Orange for balance
+                EventResponseType.ObserveAndLearn => new Color(0.4f, 0.4f, 0.4f), // Gray for observe
+                _ => new Color(0.5f, 0.5f, 0.5f)
+            };
         }
         
-        private void UpdateEventTypeVisuals()
+        private void CreateDefaultObserveButton()
         {
-            Color typeColor = currentEvent.eventType switch
+            var defaultResponse = new EventResponseOption
             {
-                EventType.Crisis => crisisColor,
-                EventType.Opportunity => opportunityColor,
-                EventType.CommunityEvent => neutralColor,
-                EventType.MetaShift => Color.cyan,
-                EventType.TournamentEvent => Color.magenta,
-                _ => neutralColor
+                buttonText = "Observe & Learn",
+                description = "Monitor the situation without taking action",
+                responseType = EventResponseType.ObserveAndLearn,
+                rpCost = 0,
+                cpCost = 0,
+                sentimentChange = 0f
             };
             
-            if (eventTypeIcon != null)
-                eventTypeIcon.color = typeColor;
-                
-            // Update title color to match event type
-            if (eventTitleText != null)
-                eventTitleText.color = typeColor;
+            CreateResponseButton(defaultResponse);
         }
         
-        private void UpdateUrgencyVisuals()
+        private void ClearSpawnedButtons()
         {
-            if (urgencyIndicator == null) return;
-            
-            Color urgencyColor = currentEvent.urgencyLevel switch
+            foreach (var button in spawnedButtons)
             {
-                EventUrgency.Low => Color.green,
-                EventUrgency.Medium => Color.yellow,
-                EventUrgency.High => Color.orange,
-                EventUrgency.Critical => Color.red,
-                _ => Color.white
-            };
-            
-            urgencyIndicator.color = urgencyColor;
-            
-            // Add pulsing effect for critical events
-            if (currentEvent.urgencyLevel == EventUrgency.Critical)
-            {
-                float pulse = (Mathf.Sin(Time.time * 3f) + 1f) * 0.5f;
-                urgencyIndicator.color = Color.Lerp(Color.red, Color.white, pulse);
+                if (button != null && button.gameObject != null)
+                {
+                    Destroy(button.gameObject);
+                }
             }
+            spawnedButtons.Clear();
         }
         
         #endregion
         
-        #region Button Handlers
+        #region Impact List Creation
         
-        private void SetupButtonListeners()
+        private void CreateImpactList()
         {
-            if (emergencyFixButton != null)
-                emergencyFixButton.onClick.AddListener(() => RespondToEvent(EventResponseType.EmergencyFix));
-                
-            if (communityManagementButton != null)
-                communityManagementButton.onClick.AddListener(() => RespondToEvent(EventResponseType.CommunityManagement));
-                
-            if (observeAndLearnButton != null)
-                observeAndLearnButton.onClick.AddListener(() => RespondToEvent(EventResponseType.ObserveAndLearn));
-                
-            // Custom response button listener is set dynamically in UpdateCustomResponseButton()
+            if (currentEvent == null || impactListContainer == null) return;
+            
+            // Clear existing impact items
+            ClearSpawnedImpactItems();
+            
+            // Create impact items
+            foreach (var impact in currentEvent.expectedImpacts)
+            {
+                CreateImpactItem(impact);
+            }
         }
         
-        private void RespondToEvent(EventResponseType responseType)
+        private void CreateImpactItem(string impactText)
         {
-            if (currentEvent == null || !currentEvent.responses.ContainsKey(responseType))
+            GameObject impactObj;
+            
+            if (impactItemPrefab != null)
             {
-                Debug.LogError($"Invalid response type: {responseType}");
-                return;
+                impactObj = Instantiate(impactItemPrefab, impactListContainer);
+            }
+            else
+            {
+                // Create simple text if no prefab
+                impactObj = new GameObject("ImpactItem");
+                impactObj.transform.SetParent(impactListContainer);
+                var text = impactObj.AddComponent<TextMeshProUGUI>();
+                text.fontSize = 14;
+                text.color = Color.white;
             }
             
-            var response = currentEvent.responses[responseType];
-            var resourceManager = Core.ResourceManager.Instance;
-            
-            // Check if we can afford the response
-            if (resourceManager != null && !resourceManager.CanSpend(response.rpCost, response.cpCost))
+            var textComponent = impactObj.GetComponent<TextMeshProUGUI>();
+            if (textComponent != null)
             {
-                Debug.Log($"Cannot afford response: {response.responseText} (Cost: {response.rpCost} RP, {response.cpCost} CP)");
-                ShowInsufficientResourcesEffect();
+                textComponent.text = $"• {impactText}";
+            }
+            
+            spawnedImpactItems.Add(impactObj);
+        }
+        
+        private void ClearSpawnedImpactItems()
+        {
+            foreach (var item in spawnedImpactItems)
+            {
+                if (item != null)
+                {
+                    Destroy(item);
+                }
+            }
+            spawnedImpactItems.Clear();
+        }
+        
+        #endregion
+        
+        #region Response Handling
+        
+        private void HandleResponse(EventResponseType responseType)
+        {
+            if (currentEvent == null || !isActive) return;
+            
+            // Find the specific response option
+            var responseOption = currentEvent.responseOptions.Find(r => r.responseType == responseType);
+            if (responseOption == null)
+            {
+                // Default response for observe
+                responseOption = new EventResponseOption
+                {
+                    responseType = responseType,
+                    rpCost = 0,
+                    cpCost = 0,
+                    sentimentChange = 0f
+                };
+            }
+            
+            // Check if player can afford the response
+            var resourceManager = Core.ResourceManager.Instance;
+            if (resourceManager != null && !resourceManager.CanSpend(responseOption.rpCost, responseOption.cpCost))
+            {
+                Debug.Log($"Cannot afford response: {responseOption.rpCost} RP, {responseOption.cpCost} CP");
+                ShowAffordabilityFeedback();
                 return;
             }
             
             // Spend resources
-            if (resourceManager != null)
+            if (resourceManager != null && (responseOption.rpCost > 0 || responseOption.cpCost > 0))
             {
-                resourceManager.SpendResources(response.rpCost, response.cpCost);
+                resourceManager.SpendResources(responseOption.rpCost, responseOption.cpCost);
             }
             
-            // Execute the response effects
-            ExecuteResponseEffects(response);
+            // Mark as resolved
+            isActive = false;
+            currentEvent.isResolved = true;
             
-            // Notify the event system
-            OnEventResponseSelected.Invoke(currentEvent, responseType);
+            // Invoke events
+            OnEventResponseSelected?.Invoke(currentEvent, responseType);
+            onEventResponded?.Invoke(currentEvent);
             
-            // Generate community feedback about the response
-            GenerateResponseFeedback(responseType, response);
+            // Show feedback
+            ShowResponseFeedback(responseOption.successMessage);
             
-            Debug.Log($"✅ Event response executed: {response.responseText}");
-            
-            // Close the event
-            CloseEvent();
+            // Auto-destroy after feedback
+            Invoke(nameof(DestroySelf), 2f);
         }
         
-        private void ExecuteResponseEffects(EventResponse response)
+        private void ShowResponseFeedback(string responseText)
         {
-            // Apply character stat changes
-            if (response.characterEffects != null && Characters.CharacterManager.Instance != null)
+            if (eventDescriptionText != null)
             {
-                var characterManager = Characters.CharacterManager.Instance;
-                foreach (var effect in response.characterEffects)
-                {
-                    characterManager.ModifyStat(effect.character, effect.stat, effect.changeAmount);
-                }
+                eventDescriptionText.text = $"✅ {responseText}";
+                eventDescriptionText.color = Color.green;
             }
             
-            // Apply community sentiment changes
-            if (response.communitySentimentChange != 0f && Community.CommunityFeedbackManager.Instance != null)
+            SetButtonsInteractable(false);
+        }
+        
+        private void ShowAffordabilityFeedback()
+        {
+            if (eventDescriptionText != null)
             {
-                // The community system will pick this up automatically through the CharacterManager events
-                Debug.Log($"Community sentiment effect: {response.communitySentimentChange:+0.0;-0.0}");
-            }
-            
-            // Apply any special effects
-            if (!string.IsNullOrEmpty(response.specialEffect))
-            {
-                ExecuteSpecialEffect(response.specialEffect);
+                eventDescriptionText.text = "❌ Insufficient resources for this response!";
+                eventDescriptionText.color = Color.red;
             }
         }
         
-        private void ExecuteSpecialEffect(string effectName)
+        private void UpdateButtonAffordability(Button button, EventResponseOption responseOption)
         {
-            // Handle special effects based on name
-            switch (effectName.ToLower())
+            var resourceManager = Core.ResourceManager.Instance;
+            if (resourceManager == null) return;
+            
+            bool canAfford = resourceManager.CanSpend(responseOption.rpCost, responseOption.cpCost);
+            button.interactable = canAfford;
+            
+            // Update cost text color
+            var costTexts = button.GetComponentsInChildren<TextMeshProUGUI>();
+            if (costTexts.Length >= 2)
             {
-                case "boost_rp_generation":
-                    // Could boost resource generation temporarily
-                    Debug.Log("🔋 RP generation boosted!");
-                    break;
-                    
-                case "unlock_emergency_cards":
-                    // Could unlock special cards in the card manager
-                    Debug.Log("🎴 Emergency cards unlocked!");
-                    break;
-                    
-                case "tournament_delay":
-                    // Could delay tournament events
-                    Debug.Log("🏆 Tournament delayed!");
-                    break;
-                    
-                default:
-                    Debug.Log($"🎭 Special effect executed: {effectName}");
-                    break;
+                costTexts[1].color = canAfford ? Color.white : Color.red;
             }
         }
         
-        private void GenerateResponseFeedback(EventResponseType responseType, EventResponse response)
+        private void SetButtonsInteractable(bool interactable)
         {
-            // Generate appropriate community feedback based on the response
-            var feedbackManager = Community.CommunityFeedbackManager.Instance;
-            if (feedbackManager == null) return;
-            
-            // Create contextual feedback about the event response
-            var responseFeedback = new Community.CommunityFeedback
+            foreach (var button in spawnedButtons)
             {
-                author = GetResponseFeedbackAuthor(responseType),
-                content = GetResponseFeedbackContent(responseType, response),
-                sentiment = CalculateResponseSentiment(responseType, response),
-                feedbackType = Community.FeedbackType.BalanceReaction,
-                communitySegment = GetResponseFeedbackSegment(responseType),
-                timestamp = System.DateTime.Now,
-                upvotes = Random.Range(10, 50),
-                replies = Random.Range(5, 25),
-                isOrganic = false
-            };
-            
-            // Add the feedback to the system
-            feedbackManager.OnNewFeedbackAdded.Invoke(responseFeedback);
+                if (button != null)
+                    button.interactable = interactable;
+            }
         }
         
-        private void ShowInsufficientResourcesEffect()
+        #endregion
+        
+        #region Visual Updates
+        
+        private void UpdateVisualTheme()
         {
-            // Visual feedback for insufficient resources
-            if (eventTitleText != null)
-            {
-                var originalColor = eventTitleText.color;
-                eventTitleText.color = Color.red;
+            if (currentEvent == null) return;
+            
+            Color themeColor = GetThemeColor();
+            Color priorityColor = GetPriorityColor();
+            
+            // Update background color to match event type
+            if (eventTypeBackground != null)
+                eventTypeBackground.color = themeColor;
+            
+            // Update priority indicator
+            if (priorityIndicator != null)
+                priorityIndicator.color = priorityColor;
+            
+            // Update event type label color
+            if (eventTypeLabel != null)
+                eventTypeLabel.color = Color.white;
                 
-                // Flash effect
-                LeanTween.color(eventTitleText.rectTransform, originalColor, 1f).setEaseOutQuad();
-            }
-            
-            Debug.Log("❌ Insufficient resources to execute response");
+            // Update priority label color
+            if (priorityLabel != null)
+                priorityLabel.color = Color.white;
         }
         
-        private void ExpireEvent()
+        private Color GetThemeColor()
+        {
+            if (currentEvent == null) return Color.white;
+            
+            return currentEvent.eventType switch
+            {
+                EventType.Crisis => crisisColor,
+                EventType.Opportunity => opportunityColor,
+                EventType.Community => communityColor,
+                EventType.Competitive => tournamentColor,
+                _ => normalColor
+            };
+        }
+        
+        private Color GetPriorityColor()
+        {
+            if (currentEvent == null) return normalColor;
+            
+            return currentEvent.severity switch
+            {
+                EventSeverity.Critical => urgentColor,
+                EventSeverity.High => normalColor,
+                EventSeverity.Medium => normalColor,
+                EventSeverity.Low => lowPriorityColor,
+                _ => normalColor
+            };
+        }
+        
+        #endregion
+        
+        #region Update and Lifecycle
+        
+        private void Update()
+        {
+            if (!isActive || currentEvent == null) return;
+            
+            // Update timer
+            currentEvent.timeRemaining -= Time.deltaTime;
+            UpdateTimeDisplay();
+            UpdateAllButtonAffordability();
+            
+            // Check for expiration
+            if (currentEvent.timeRemaining <= 0f)
+            {
+                HandleExpiration();
+            }
+        }
+        
+        private void UpdateAllButtonAffordability()
+        {
+            if (currentEvent == null) return;
+            
+            for (int i = 0; i < spawnedButtons.Count && i < currentEvent.responseOptions.Count; i++)
+            {
+                UpdateButtonAffordability(spawnedButtons[i], currentEvent.responseOptions[i]);
+            }
+        }
+        
+        private void HandleExpiration()
         {
             if (!isActive) return;
             
             isActive = false;
             
-            // Disable all buttons
-            SetAllButtonsInteractable(false);
+            // Invoke expiration events
+            OnEventExpired?.Invoke(currentEvent);
+            onEventDismissed?.Invoke(currentEvent);
             
-            // Apply expiration penalties if any
-            if (currentEvent.expirationPenalty != null)
+            // Show expiration feedback
+            if (eventDescriptionText != null)
             {
-                ExecuteResponseEffects(currentEvent.expirationPenalty);
+                eventDescriptionText.text = "⏰ Event expired! Response window closed.";
+                eventDescriptionText.color = Color.red;
             }
             
-            OnEventExpired.Invoke(currentEvent);
+            SetButtonsInteractable(false);
             
-            // Auto-close after a delay to show the expiration
-            Invoke(nameof(CloseEvent), 2f);
+            // Auto-destroy
+            Invoke(nameof(DestroySelf), 3f);
+        }
+        
+        private void DestroySelf()
+        {
+            if (gameObject != null)
+                Destroy(gameObject);
         }
         
         #endregion
         
-        #region Utility Methods
+        #region Public API
         
-        private void SetAllButtonsInteractable(bool interactable)
+        /// <summary>
+        /// Refresh display for external updates
+        /// </summary>
+        public void RefreshDisplay()
         {
-            if (emergencyFixButton != null) emergencyFixButton.interactable = interactable;
-            if (communityManagementButton != null) communityManagementButton.interactable = interactable;
-            if (observeAndLearnButton != null) observeAndLearnButton.interactable = interactable;
-            if (customResponseButton != null) customResponseButton.interactable = interactable;
-        }
-        
-        private string FormatExpectedImpact(List<string> impacts)
-        {
-            if (impacts == null || impacts.Count == 0) return "Unknown impact";
-            return string.Join("\n• ", impacts.ToArray());
-        }
-        
-        private string FormatCost(int rpCost, int cpCost)
-        {
-            if (rpCost > 0 && cpCost > 0)
-                return $"{rpCost} RP, {cpCost} CP";
-            else if (rpCost > 0)
-                return $"{rpCost} RP";
-            else if (cpCost > 0)
-                return $"{cpCost} CP";
-            else
-                return "Free";
-        }
-        
-        private string GetResponseFeedbackAuthor(EventResponseType responseType)
-        {
-            return responseType switch
+            if (currentEvent != null)
             {
-                EventResponseType.EmergencyFix => "DevTeam_Response",
-                EventResponseType.CommunityManagement => "CommunityManager",
-                EventResponseType.ObserveAndLearn => "DataAnalyst",
-                EventResponseType.IgnoreEvent => "Community_Watcher",
-                _ => "EventObserver"
-            };
-        }
-        
-        private string GetResponseFeedbackContent(EventResponseType responseType, EventResponse response)
-        {
-            return responseType switch
-            {
-                EventResponseType.EmergencyFix => "Quick hotfix deployed! ⚡ Hope this addresses the immediate issues",
-                EventResponseType.CommunityManagement => "Devs are communicating well about this situation 📢",
-                EventResponseType.ObserveAndLearn => "Interesting approach - let's see how this plays out 👀",
-                EventResponseType.IgnoreEvent => "No response to the situation... concerning 🤔",
-                _ => $"Response to recent events: {response.responseText}"
-            };
-        }
-        
-        private float CalculateResponseSentiment(EventResponseType responseType, EventResponse response)
-        {
-            float baseSentiment = responseType switch
-            {
-                EventResponseType.EmergencyFix => 0.6f,      // Generally positive
-                EventResponseType.CommunityManagement => 0.4f, // Moderately positive
-                EventResponseType.ObserveAndLearn => 0.0f,   // Neutral
-                EventResponseType.IgnoreEvent => -0.5f,      // Negative
-                _ => 0.0f
-            };
-            
-            // Add some variance
-            return baseSentiment + Random.Range(-0.2f, 0.2f);
-        }
-        
-        private string GetResponseFeedbackSegment(EventResponseType responseType)
-        {
-            return responseType switch
-            {
-                EventResponseType.EmergencyFix => "Competitive",
-                EventResponseType.CommunityManagement => "Casual Players",
-                EventResponseType.ObserveAndLearn => "Pro Players",
-                _ => "General"
-            };
-        }
-        
-        #endregion
-        
-        #region Public Getters
-        
-        public EventData GetCurrentEvent() => currentEvent;
-        public bool IsActive() => isActive;
-        public float GetTimeRemaining() => timeRemaining;
-        
-        #endregion
-        
-        #region Debug Methods
-        
-        [ContextMenu("🧪 Test Crisis Event")]
-        public void TestCrisisEvent()
-        {
-            var testEvent = EventDataFactory.CreateSupportExploitCrisis();
-            DisplayEvent(testEvent);
-        }
-        
-        [ContextMenu("🧪 Test Opportunity Event")]
-        public void TestOpportunityEvent()
-        {
-            var testEvent = EventDataFactory.CreateTournamentOpportunity();
-            DisplayEvent(testEvent);
-        }
-        
-        [ContextMenu("🔍 Debug Current Event")]
-        public void DebugCurrentEvent()
-        {
-            if (currentEvent == null)
-            {
-                Debug.Log("❌ No current event");
-                return;
+                DisplayEvent();
+                UpdateVisualTheme();
+                UpdateAllButtonAffordability();
             }
-            
-            Debug.Log("=== 🔍 CURRENT EVENT DEBUG ===");
-            Debug.Log($"Title: {currentEvent.eventTitle}");
-            Debug.Log($"Type: {currentEvent.eventType}");
-            Debug.Log($"Urgency: {currentEvent.urgencyLevel}");
-            Debug.Log($"Time Remaining: {timeRemaining:F1}s");
-            Debug.Log($"Responses Available: {currentEvent.responses.Count}");
-            
-            foreach (var response in currentEvent.responses)
+        }
+        
+        /// <summary>
+        /// Check if this event item is still active
+        /// </summary>
+        public bool IsActive()
+        {
+            return isActive && currentEvent != null;
+        }
+        
+        /// <summary>
+        /// Get the current event data
+        /// </summary>
+        public EventData GetEventData()
+        {
+            return currentEvent;
+        }
+        
+        /// <summary>
+        /// Force dismiss this event
+        /// </summary>
+        public void DismissEvent()
+        {
+            if (isActive)
             {
-                Debug.Log($"  {response.Key}: {response.Value.responseText} (Cost: {response.Value.rpCost} RP, {response.Value.cpCost} CP)");
+                HandleExpiration();
             }
         }
         
         #endregion
     }
+}

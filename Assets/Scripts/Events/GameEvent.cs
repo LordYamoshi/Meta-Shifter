@@ -1,10 +1,14 @@
-// Assets/Scripts/Events/GameEvent.cs
 using UnityEngine;
 using System.Collections.Generic;
 using System;
 
 namespace MetaBalance.Events
 {
+    /// <summary>
+    /// Legacy GameEvent class - rewritten to work with new EventData system
+    /// Maintains backward compatibility while avoiding conflicts
+    /// Uses composition instead of duplicate enums
+    /// </summary>
     [System.Serializable]
     public class GameEvent
     {
@@ -12,8 +16,8 @@ namespace MetaBalance.Events
         public string eventId;
         public string eventTitle;
         public string eventDescription;
-        public EventType eventType;
-        public EventSeverity severity;
+        public EventType eventType; // Uses the enum from EventData
+        public EventSeverity severity; // Uses the enum from EventData
         
         [Header("Event Context")]
         public List<string> affectedCharacters = new List<string>();
@@ -22,11 +26,11 @@ namespace MetaBalance.Events
         public float duration = 1f; // How many turns the event lasts
         
         [Header("Event Responses")]
-        public List<EventResponse> availableResponses = new List<EventResponse>();
-        public EventResponse defaultResponse;
+        public List<GameEventResponse> availableResponses = new List<GameEventResponse>();
+        public GameEventResponse defaultResponse;
         
         [Header("Event Effects")]
-        public EventEffects effects;
+        public GameEventEffects effects;
         
         [Header("Visual & Audio")]
         public Sprite eventIcon;
@@ -79,15 +83,91 @@ namespace MetaBalance.Events
                 _ => "📋"
             };
         }
+        
+        /// <summary>
+        /// Convert this GameEvent to the new EventData format
+        /// </summary>
+        public EventData ToEventData()
+        {
+            var eventData = new EventData(eventTitle, eventDescription, eventType, severity)
+            {
+                timeRemaining = turnsRemaining * 30f, // Convert turns to seconds
+                expectedImpact = CalculateExpectedImpact(),
+                expectedImpacts = GenerateExpectedImpacts(),
+                eventColor = eventColor,
+                iconName = eventIcon?.name ?? ""
+            };
+            
+            // Convert responses
+            foreach (var response in availableResponses)
+            {
+                eventData.responseOptions.Add(response.ToEventResponseOption());
+            }
+            
+            return eventData;
+        }
+        
+        private float CalculateExpectedImpact()
+        {
+            return severity switch
+            {
+                EventSeverity.Low => 2f,
+                EventSeverity.Medium => 5f,
+                EventSeverity.High => 8f,
+                EventSeverity.Critical => 10f,
+                _ => 1f
+            };
+        }
+        
+        private List<string> GenerateExpectedImpacts()
+        {
+            var impacts = new List<string>();
+            
+            switch (eventType)
+            {
+                case EventType.Crisis:
+                    impacts.Add("Community backlash risk");
+                    impacts.Add("Player satisfaction impact");
+                    if (severity == EventSeverity.Critical)
+                        impacts.Add("Emergency response required");
+                    break;
+                    
+                case EventType.Opportunity:
+                    impacts.Add("Positive community impact");
+                    impacts.Add("Engagement boost potential");
+                    impacts.Add("PR opportunity");
+                    break;
+                    
+                case EventType.Community:
+                    impacts.Add("Community sentiment shift");
+                    impacts.Add("Player feedback influence");
+                    break;
+                    
+                case EventType.Technical:
+                    impacts.Add("System performance impact");
+                    impacts.Add("Player experience effects");
+                    break;
+                    
+                case EventType.Competitive:
+                    impacts.Add("Competitive balance impact");
+                    impacts.Add("Pro player satisfaction");
+                    break;
+            }
+            
+            return impacts;
+        }
     }
     
+    /// <summary>
+    /// GameEvent response - converts to new EventResponseOption
+    /// </summary>
     [System.Serializable]
-    public class EventResponse
+    public class GameEventResponse
     {
         public string responseId;
         public string buttonText;
         public string responseDescription;
-        public ResponseType responseType;
+        public LegacyResponseType responseType; // Renamed to avoid conflicts
         
         [Header("Resource Costs")]
         public int rpCost;
@@ -98,7 +178,7 @@ namespace MetaBalance.Events
         public int requiredCardCount = 1;
         
         [Header("Response Effects")]
-        public EventResponseEffects effects;
+        public GameEventResponseEffects effects;
         
         [Header("Availability")]
         public List<string> requiredConditions = new List<string>();
@@ -118,71 +198,62 @@ namespace MetaBalance.Events
             var cardManager = Cards.CardManager.Instance;
             if (cardManager == null) return false;
             
-            var availableCards = cardManager.GetCurrentHandData();
+            // You'd implement this based on your card system
+            // var availableCards = cardManager.GetCurrentHandData();
             
-            foreach (var requiredType in requiredCardTypes)
-            {
-                int countOfType = 0;
-                foreach (var card in availableCards)
-                {
-                    if (card.cardType == requiredType) countOfType++;
-                }
-                
-                if (countOfType < requiredCardCount) return false;
-            }
-            
-            return true;
+            return true; // Placeholder
         }
         
-        public bool IsCurrentlyAvailable()
+        /// <summary>
+        /// Convert to new EventResponseOption format
+        /// </summary>
+        public EventResponseOption ToEventResponseOption()
         {
-            if (!isAvailable) return false;
-            if (!CanAfford()) return false;
-            if (!HasRequiredCards()) return false;
-            
-            // Check custom conditions
-            foreach (var condition in requiredConditions)
+            return new EventResponseOption
             {
-                if (!CheckCondition(condition)) return false;
-            }
-            
-            return true;
+                buttonText = buttonText,
+                description = responseDescription,
+                responseType = ConvertResponseType(),
+                rpCost = rpCost,
+                cpCost = cpCost,
+                sentimentChange = effects?.satisfactionChange ?? 0f,
+                successMessage = effects?.successMessage ?? "Response completed",
+                buttonColor = GetResponseColor()
+            };
         }
         
-        private bool CheckCondition(string condition)
+        private EventResponseType ConvertResponseType()
         {
-            return condition switch
+            return responseType switch
             {
-                "planning_phase" => Core.PhaseManager.Instance?.GetCurrentPhase() == Core.GamePhase.Planning,
-                "implementation_phase" => Core.PhaseManager.Instance?.GetCurrentPhase() == Core.GamePhase.Implementation,
-                "high_satisfaction" => Characters.CharacterManager.Instance?.CalculateOverallBalance() > 70f,
-                "low_satisfaction" => Characters.CharacterManager.Instance?.CalculateOverallBalance() < 40f,
-                _ => true // Unknown conditions default to true
+                LegacyResponseType.Emergency => EventResponseType.EmergencyFix,
+                LegacyResponseType.Strategic => EventResponseType.CustomResponse,
+                LegacyResponseType.Community => EventResponseType.CommunityManagement,
+                LegacyResponseType.Technical => EventResponseType.EmergencyFix,
+                LegacyResponseType.Ignore => EventResponseType.Ignore,
+                LegacyResponseType.Escalate => EventResponseType.CustomResponse,
+                _ => EventResponseType.ObserveAndLearn
+            };
+        }
+        
+        private Color GetResponseColor()
+        {
+            return responseType switch
+            {
+                LegacyResponseType.Emergency => new Color(0.8f, 0.3f, 0.4f), // Red
+                LegacyResponseType.Community => new Color(0.6f, 0.4f, 0.8f), // Purple
+                LegacyResponseType.Strategic => new Color(0.4f, 0.6f, 0.8f), // Blue
+                LegacyResponseType.Technical => new Color(0.5f, 0.5f, 0.5f), // Gray
+                _ => new Color(0.3f, 0.4f, 0.8f) // Default blue
             };
         }
     }
     
+    /// <summary>
+    /// GameEvent response effects
+    /// </summary>
     [System.Serializable]
-    public class EventEffects
-    {
-        [Header("Character Effects")]
-        public List<CharacterEffect> characterEffects = new List<CharacterEffect>();
-        
-        [Header("Resource Effects")]
-        public int rpChange;
-        public int cpChange;
-        
-        [Header("Community Effects")]
-        public float satisfactionChange;
-        public string communityMessage;
-        
-        [Header("Meta Effects")]
-        public bool triggersMetaShift;
-        public float metaStabilityChange;
-    }
-    
-    [System.Serializable]
-    public class EventResponseEffects
+    public class GameEventResponseEffects
     {
         [Header("Immediate Effects")]
         public float satisfactionChange;
@@ -190,7 +261,7 @@ namespace MetaBalance.Events
         public int cpReward;
         
         [Header("Character Effects")]
-        public List<CharacterEffect> characterEffects = new List<CharacterEffect>();
+        public List<GameEventCharacterEffect> characterEffects = new List<GameEventCharacterEffect>();
         
         [Header("Success Chance")]
         [Range(0f, 1f)]
@@ -203,36 +274,52 @@ namespace MetaBalance.Events
         public string failureMessage;
     }
     
+    /// <summary>
+    /// Character effect for GameEvents - renamed to avoid conflicts
+    /// </summary>
     [System.Serializable]
-    public class CharacterEffect
+    public class GameEventCharacterEffect
     {
         public Characters.CharacterType character;
         public Characters.CharacterStat stat;
         public float change;
         public bool isPercentage = true;
+        
+        /// <summary>
+        /// Convert to new CharacterStatChange format
+        /// </summary>
+        public CharacterStatChange ToCharacterStatChange()
+        {
+            return new CharacterStatChange(character, stat, change);
+        }
     }
     
-    public enum EventType
+    /// <summary>
+    /// Overall GameEvent effects
+    /// </summary>
+    [System.Serializable]
+    public class GameEventEffects
     {
-        Crisis,           // Exploits, bugs, server issues
-        Community,        // Social media trends, feedback
-        Competitive,      // Tournament results, pro player actions
-        Opportunity,      // Positive events, partnerships
-        Seasonal,         // Holiday events, special periods
-        Meta,            // Natural meta shifts, discoveries
-        Technical,       // Server maintenance, updates
-        Special          // Unique one-time events
+        [Header("Community Impact")]
+        public float sentimentChange = 0f;
+        public float engagementChange = 0f;
+        
+        [Header("Resource Impact")]
+        public int rpChange = 0;
+        public int cpChange = 0;
+        
+        [Header("Character Impact")]
+        public List<GameEventCharacterEffect> characterEffects = new List<GameEventCharacterEffect>();
+        
+        [Header("Meta Impact")]
+        public float balanceShift = 0f;
+        public List<string> affectedSystems = new List<string>();
     }
     
-    public enum EventSeverity
-    {
-        Low,      // Minor impact, optional response
-        Medium,   // Moderate impact, response recommended  
-        High,     // Major impact, response strongly advised
-        Critical  // Severe impact, immediate response required
-    }
-    
-    public enum ResponseType
+    /// <summary>
+    /// Legacy response types - renamed to avoid conflicts with new system
+    /// </summary>
+    public enum LegacyResponseType
     {
         Emergency,    // Quick fix, high cost
         Strategic,    // Planned response, balanced cost
@@ -240,5 +327,103 @@ namespace MetaBalance.Events
         Technical,    // Technical solution
         Ignore,       // Do nothing
         Escalate      // Pass to higher authority
+    }
+    
+    /// <summary>
+    /// Factory for creating GameEvents that work with the new system
+    /// </summary>
+    public static class GameEventFactory
+    {
+        /// <summary>
+        /// Create a GameEvent from an EventData (for backward compatibility)
+        /// </summary>
+        public static GameEvent CreateFromEventData(EventData eventData)
+        {
+            var gameEvent = new GameEvent
+            {
+                eventTitle = eventData.title,
+                eventDescription = eventData.description,
+                eventType = eventData.eventType,
+                severity = eventData.severity,
+                turnsRemaining = Mathf.CeilToInt(eventData.timeRemaining / 30f),
+                eventColor = eventData.eventColor,
+                isActive = !eventData.isResolved
+            };
+            
+            // Convert response options
+            foreach (var responseOption in eventData.responseOptions)
+            {
+                gameEvent.availableResponses.Add(CreateGameEventResponse(responseOption));
+            }
+            
+            return gameEvent;
+        }
+        
+        private static GameEventResponse CreateGameEventResponse(EventResponseOption responseOption)
+        {
+            return new GameEventResponse
+            {
+                buttonText = responseOption.buttonText,
+                responseDescription = responseOption.description,
+                responseType = ConvertToLegacyResponseType(responseOption.responseType),
+                rpCost = responseOption.rpCost,
+                cpCost = responseOption.cpCost,
+                effects = new GameEventResponseEffects
+                {
+                    satisfactionChange = responseOption.sentimentChange,
+                    successMessage = responseOption.successMessage,
+                    successChance = responseOption.successChance
+                }
+            };
+        }
+        
+        private static LegacyResponseType ConvertToLegacyResponseType(EventResponseType responseType)
+        {
+            return responseType switch
+            {
+                EventResponseType.EmergencyFix => LegacyResponseType.Emergency,
+                EventResponseType.CommunityManagement => LegacyResponseType.Community,
+                EventResponseType.CustomResponse => LegacyResponseType.Strategic,
+                EventResponseType.Ignore => LegacyResponseType.Ignore,
+                _ => LegacyResponseType.Strategic
+            };
+        }
+        
+        /// <summary>
+        /// Create a legacy-style crisis event
+        /// </summary>
+        public static GameEvent CreateLegacyCrisisEvent(string title, string description)
+        {
+            var gameEvent = new GameEvent
+            {
+                eventTitle = title,
+                eventDescription = description,
+                eventType = EventType.Crisis,
+                severity = EventSeverity.High,
+                turnsRemaining = 2,
+                isUrgent = true
+            };
+            
+            // Add default responses
+            gameEvent.availableResponses.Add(new GameEventResponse
+            {
+                buttonText = "Emergency Response",
+                responseDescription = "Quick action to address the crisis",
+                responseType = LegacyResponseType.Emergency,
+                rpCost = 3,
+                cpCost = 1
+            });
+            
+            gameEvent.availableResponses.Add(new GameEventResponse
+            {
+                buttonText = "Communicate",
+                responseDescription = "Address community concerns",
+                responseType = LegacyResponseType.Community,
+                rpCost = 1,
+                cpCost = 3
+            });
+            
+            return gameEvent;
+        }
     }
 }

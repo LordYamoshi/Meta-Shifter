@@ -276,8 +276,8 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 120025412}
-  - component: {fileID: 120025413}
   - component: {fileID: 120025414}
+  - component: {fileID: 120025413}
   m_Layer: 5
   m_Name: Content
   m_TagString: Untagged
@@ -322,7 +322,7 @@ MonoBehaviour:
     m_Top: 0
     m_Bottom: 0
   m_ChildAlignment: 0
-  m_Spacing: 270
+  m_Spacing: 10
   m_ChildForceExpandWidth: 1
   m_ChildForceExpandHeight: 1
   m_ChildControlWidth: 0
@@ -4237,7 +4237,7 @@ MonoBehaviour:
   m_Vertical: 1
   m_MovementType: 2
   m_Elasticity: 0.1
-  m_Inertia: 1
+  m_Inertia: 0
   m_DecelerationRate: 0.135
   m_ScrollSensitivity: 1
   m_Viewport: {fileID: 1819918827}
@@ -4533,7 +4533,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1415299406}
   - component: {fileID: 1415299408}
-  - component: {fileID: 1415299407}
+  - component: {fileID: 1415299409}
   m_Layer: 0
   m_Name: EventManager
   m_TagString: Untagged
@@ -4556,18 +4556,6 @@ Transform:
   m_Children: []
   m_Father: {fileID: 246301556}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &1415299407
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1415299405}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 47cef3a2fc714e64c94c2ae936068e75, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
 --- !u!114 &1415299408
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -4580,86 +4568,51 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 12aea750ec1caac4ebf8189f25b9f228, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  availableEvents:
-  - eventId: 1
-    eventTitle: 2
-    eventDescription: 3
-    eventType: 0
-    severity: 0
-    affectedCharacters: []
-    requiredTags: []
-    triggerWeek: 0
-    duration: 0
-    availableResponses:
-    - responseId: test
-      buttonText: test
-      responseDescription: test
-      responseType: 1
-      rpCost: 3
-      cpCost: 0
-      requiredCardTypes: 00000000
-      requiredCardCount: 0
-      effects:
-        satisfactionChange: 3
-        rpReward: -3
-        cpReward: 0
-        characterEffects: []
-        successChance: 0.574
-        triggeredEventIds: []
-        successMessage: 
-        failureMessage: 
-      requiredConditions: []
-      isAvailable: 0
-      unavailableReason: 
-    defaultResponse:
-      responseId: 
-      buttonText: 
-      responseDescription: 
-      responseType: 0
-      rpCost: 0
-      cpCost: 0
-      requiredCardTypes: 
-      requiredCardCount: 0
-      effects:
-        satisfactionChange: 0
-        rpReward: 0
-        cpReward: 0
-        characterEffects: []
-        successChance: 0
-        triggeredEventIds: []
-        successMessage: 
-        failureMessage: 
-      requiredConditions: []
-      isAvailable: 0
-      unavailableReason: 
-    effects:
-      characterEffects: []
-      rpChange: 0
-      cpChange: 0
-      satisfactionChange: 0
-      communityMessage: 
-      triggersMetaShift: 0
-      metaStabilityChange: 0
-    eventIcon: {fileID: 0}
-    eventColor: {r: 0, g: 0, b: 0, a: 0}
-    eventSound: {fileID: 0}
-    isActive: 0
-    isUrgent: 1
-    turnsRemaining: 3
-  maxActiveEvents: 3
-  eventTriggerChance: 0.3
+  eventUIManager: {fileID: 434006296}
+  maxSimultaneousEvents: 3
+  randomEventChance: 0.3
+  minTimeBetweenEvents: 30
+  maxTimeBetweenEvents: 180
+  triggerOnLowSentiment: 1
+  triggerOnHighSentiment: 1
+  triggerOnMajorChanges: 1
+  triggerOnSeasonalEvents: 1
+  lowSentimentThreshold: 30
+  highSentimentThreshold: 75
+  majorChangeThreshold: 15
   OnEventTriggered:
     m_PersistentCalls:
       m_Calls: []
   OnEventResolved:
     m_PersistentCalls:
       m_Calls: []
-  OnEventResponseChosen:
+  OnEventExpired:
     m_PersistentCalls:
       m_Calls: []
-  OnActiveEventsChanged:
+  OnEventSystemMessage:
     m_PersistentCalls:
       m_Calls: []
+--- !u!114 &1415299409
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1415299405}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bf8b3165665003c4faf4c33c06a7e089, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  eventManager: {fileID: 1415299408}
+  eventUIManager: {fileID: 434006296}
+  respondToPhaseChanges: 1
+  respondToResourceChanges: 1
+  respondToCharacterChanges: 1
+  respondToCommunitySentiment: 1
+  sentimentEventThreshold: 20
+  resourceCrisisThreshold: 10
+  maxEventsPerPhase: 2
 --- !u!1 &1417457903
 GameObject:
   m_ObjectHideFlags: 0
