@@ -12,8 +12,8 @@ MonoBehaviour:
   m_Script: {fileID: 0}
   m_Name: Increase Warrior Health
   m_EditorClassIdentifier: Assembly-CSharp:MetaBalance.Cards:BalanceChangeCard
-  cardName: Warrior Health Increase
-  description: Increases the warrior's health by 10%
+  cardName: 
+  description: 
   cardType: 0
   rarity: 0
   researchPointCost: 0
@@ -22,4 +22,4 @@ MonoBehaviour:
   cardColor: {r: 1, g: 1, b: 1, a: 1}
   targetCharacter: 0
   targetStat: 0
-  percentageChange: 10
+  percentageChange: 0
